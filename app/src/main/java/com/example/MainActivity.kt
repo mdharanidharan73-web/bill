@@ -33,8 +33,8 @@ import com.example.ui.viewmodel.BillCircleViewModel
 import com.example.util.configureAppCheck
 import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseUser
-import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -69,7 +69,9 @@ private fun BillCircleRootApp() {
     val prefsStore = remember(context) { PreferencesStore(context.applicationContext) }
     val selectedLang by prefsStore.languageFlow.collectAsStateWithLifecycle(initialValue = AppLanguage.ENGLISH)
 
-    val currentUser by Firebase.auth.authStateFlow().collectAsStateWithLifecycle(initialValue = Firebase.auth.currentUser)
+    val firebaseAuth = remember(context) { safeFirebaseAuthOrNull(context) }
+    val authFlow = remember(firebaseAuth) { firebaseAuth?.authStateFlow() ?: flowOf(null) }
+    val currentUser by authFlow.collectAsStateWithLifecycle(initialValue = firebaseAuth?.currentUser)
 
     CompositionLocalProvider(LocalAppStrings provides stringsFor(selectedLang)) {
         val user = currentUser
