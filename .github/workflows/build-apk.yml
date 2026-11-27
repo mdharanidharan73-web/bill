@@ -19,15 +19,53 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Accept Android SDK licenses and install SDK 36.1
+      - name: Set up Android SDK and install API 36.1
         shell: bash
         run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          mkdir -p "$SDK_ROOT"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+
+          SDKMANAGER=""
+          if [ -x "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
+            SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          else
+            FOUND="$(find "$SDK_ROOT/cmdline-tools" -maxdepth 3 -name sdkmanager -type f 2>/dev/null | head -n 1 || true)"
+            if [ -n "$FOUND" ] && [ -x "$FOUND" ]; then
+              SDKMANAGER="$FOUND"
+            fi
+          fi
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "Installing Android command-line tools..."
+            TMP_ZIP="$(mktemp /tmp/cmdline-tools.XXXXXX.zip)"
+            TMP_DIR="$(mktemp -d /tmp/cmdline-tools-extract.XXXXXX)"
+            curl -fsSL "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip" -o "$TMP_ZIP"
+            unzip -q "$TMP_ZIP" -d "$TMP_DIR"
+            mkdir -p "$SDK_ROOT/cmdline-tools"
+            rm -rf "$SDK_ROOT/cmdline-tools/latest"
+            mv "$TMP_DIR/cmdline-tools" "$SDK_ROOT/cmdline-tools/latest"
+            rm -rf "$TMP_ZIP" "$TMP_DIR"
+            SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          fi
+
+          echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
+          echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+
           set +o pipefail
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager "platform-tools" "platforms;android-36.1" "build-tools;36.0.0"
+          yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses > /dev/null || true
+          set -o pipefail
+
+          "$SDKMANAGER" --sdk_root="$SDK_ROOT" --install \
+            "platform-tools" \
+            "platforms;android-36" \
+            "platforms;android-36.1" \
+            "build-tools;36.0.0"
+
+          set +o pipefail
+          yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses > /dev/null || true
 
       - name: Set up Gradle 9.3.1
         uses: gradle/actions/setup-gradle@v4
@@ -76,17 +114,15 @@ jobs:
       - name: Build Debug APK
         run: gradle :app:assembleDebug --stacktrace
 
-      - name: Prepare BillCircle APK artifact
+      - name: Verify Debug APK output
         if: success()
         shell: bash
-        run: |
-          cp app/build/outputs/apk/debug/app-debug.apk BillCircle.apk
-          ls -lh BillCircle.apk
+        run: ls -lh app/build/outputs/apk/debug/app-debug.apk
 
-      - name: Upload BillCircle APK
+      - name: Upload BillCircle Debug APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: BillCircle-APK
-          path: BillCircle.apk
+          name: BillCircle-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
