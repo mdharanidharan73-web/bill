@@ -1,0 +1,31 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Default deny
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    // Optional Firebase Storage path organized by group, bill, and uploader
+    // Deploy via Firebase Console if enabling large multi-MB Cloud Storage files
+    match /groups/{groupId}/bills/{billId}/{uploaderUid}/{fileName} {
+      allow read: if request.auth != null &&
+                     firestore.exists(/databases/(default)/documents/bills/$(billId)) &&
+                     request.auth.uid in firestore.get(/databases/(default)/documents/bills/$(billId)).data.memberUids;
+
+      allow create: if request.auth != null &&
+                       request.auth.uid == uploaderUid &&
+                       request.resource.size > 0 &&
+                       request.resource.size <= 10 * 1024 * 1024 &&
+                       request.resource.contentType in ['image/jpeg', 'image/png', 'application/pdf'] &&
+                       firestore.exists(/databases/(default)/documents/bills/$(billId)) &&
+                       request.auth.uid in firestore.get(/databases/(default)/documents/bills/$(billId)).data.memberUids &&
+                       !(request.auth.uid in firestore.get(/databases/(default)/documents/bills/$(billId)).data.viewerUids);
+
+      allow delete: if request.auth != null &&
+                       (request.auth.uid == uploaderUid ||
+                        (firestore.exists(/databases/(default)/documents/bills/$(billId)) &&
+                         request.auth.uid in firestore.get(/databases/(default)/documents/bills/$(billId)).data.adminUids));
+    }
+  }
+}

@@ -1,0 +1,645 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net: deny everything by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Core Primitives
+    // -------------------------------------------------------------------------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidUidList(arr, maxLen) {
+      return arr is list && arr.size() <= maxLen && (arr.size() == 0 || arr[0] is string);
+    }
+
+    function isValidTimestamp(ts) {
+      return ts is timestamp && ts <= request.time;
+    }
+
+    function isOptionalString(data, key, maxLen) {
+      return !(key in data) || data[key] == null || (data[key] is string && data[key].size() <= maxLen);
+    }
+
+    function isOptionalInt(data, key, minVal) {
+      return !(key in data) || data[key] == null || (data[key] is int && data[key] >= minVal);
+    }
+
+    function isGroupAdminDoc(groupId) {
+      return exists(/databases/$(database)/documents/groups/$(groupId)) &&
+             request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.adminUids;
+    }
+
+    // -------------------------------------------------------------------------
+    // Entity Validation Blueprints (Anti-Update-Gap)
+    // -------------------------------------------------------------------------
+    function isValidUserProfile(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100 &&
+             data.email is string && data.email.size() >= 3 && data.email.size() <= 150 &&
+             data.preferredLanguage in ['en', 'kn', 'ta'] &&
+             isOptionalString(data, 'phoneNumber', 24) &&
+             isOptionalString(data, 'photoUrl', 600) &&
+             isOptionalString(data, 'defaultUpiId', 100) &&
+             isOptionalString(data, 'defaultUpiName', 100) &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidGroup(data) {
+      return data.name is string && data.name.size() >= 1 && data.name.size() <= 100 &&
+             isOptionalString(data, 'description', 400) &&
+             data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
+             data.ownerName is string && data.ownerName.size() >= 1 && data.ownerName.size() <= 100 &&
+             isOptionalString(data, 'upiId', 100) &&
+             isOptionalString(data, 'upiRecipientName', 100) &&
+             isValidUidList(data.memberUids, 50) && data.memberUids.size() >= 1 &&
+             isValidUidList(data.adminUids, 10) && data.adminUids.size() >= 1 &&
+             isValidUidList(data.viewerUids, 50) &&
+             data.memberCount is int && data.memberCount >= 1 && data.memberCount <= 50 &&
+             data.archived is bool &&
+             isOptionalString(data, 'lastInviteCode', 32) &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidGroupMember(data) {
+      return isValidId(data.groupId) &&
+             data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
+             isValidUidList(data.memberUids, 50) &&
+             isValidUidList(data.adminUids, 10) &&
+             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100 &&
+             isOptionalString(data, 'phoneNumber', 24) &&
+             isOptionalString(data, 'email', 150) &&
+             data.role in ['ADMIN', 'MEMBER', 'VIEWER'] &&
+             data.status in ['ACTIVE', 'INACTIVE'] &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidInvitation(data) {
+      return isValidId(data.groupId) &&
+             data.groupName is string && data.groupName.size() >= 1 && data.groupName.size() <= 100 &&
+             data.role in ['MEMBER', 'VIEWER'] &&
+             data.createdBy is string && data.createdBy.size() >= 1 && data.createdBy.size() <= 128 &&
+             data.createdByName is string && data.createdByName.size() >= 1 && data.createdByName.size() <= 100 &&
+             data.status in ['ACTIVE', 'USED', 'REVOKED'] &&
+             data.expiresAt is timestamp &&
+             data.maxUses is int && data.maxUses >= 1 && data.maxUses <= 50 &&
+             data.usedCount is int && data.usedCount >= 0 && data.usedCount <= data.maxUses &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidBill(data) {
+      return data.billCode is string && data.billCode.size() >= 3 && data.billCode.size() <= 32 &&
+             isValidId(data.groupId) &&
+             data.groupName is string && data.groupName.size() >= 1 && data.groupName.size() <= 100 &&
+             data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
+             data.ownerName is string && data.ownerName.size() >= 1 && data.ownerName.size() <= 100 &&
+             isValidUidList(data.memberUids, 50) && data.memberUids.size() >= 1 &&
+             isValidUidList(data.adminUids, 10) && data.adminUids.size() >= 1 &&
+             isValidUidList(data.viewerUids, 50) &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 120 &&
+             data.category is string && data.category.size() >= 1 && data.category.size() <= 50 &&
+             isOptionalString(data, 'merchantName', 120) &&
+             isOptionalString(data, 'description', 600) &&
+             isOptionalString(data, 'notes', 600) &&
+             data.totalPaise is int && data.totalPaise > 0 && data.totalPaise <= 10000000000 &&
+             data.collectedPaise is int && data.collectedPaise >= 0 && data.collectedPaise <= 10000000000 &&
+             data.splitType in ['EQUAL', 'CUSTOM', 'PERCENTAGE'] &&
+             data.billDateMillis is int && data.billDateMillis > 0 &&
+             data.dueDateMillis is int && data.dueDateMillis > 0 &&
+             data.status in ['DRAFT', 'PUBLISHED', 'AWAITING_APPROVAL', 'APPROVED', 'DISPUTED', 'PAYMENT_IN_PROGRESS', 'CLEARED'] &&
+             isOptionalString(data, 'upiId', 100) &&
+             isOptionalString(data, 'upiRecipientName', 100) &&
+             data.participantCount is int && data.participantCount >= 1 && data.participantCount <= 50 &&
+             data.paidCount is int && data.paidCount >= 0 && data.paidCount <= 50 &&
+             data.approvedCount is int && data.approvedCount >= 0 && data.approvedCount <= 50 &&
+             data.disputedCount is int && data.disputedCount >= 0 && data.disputedCount <= 50 &&
+             isOptionalString(data, 'clearanceOverrideReason', 300) &&
+             isOptionalInt(data, 'clearedAtMillis', 0) &&
+             data.aiScanned is bool &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidBillParticipant(data) {
+      return isValidId(data.billId) &&
+             isValidId(data.groupId) &&
+             data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
+             data.participantUid is string && data.participantUid.size() >= 1 && data.participantUid.size() <= 128 &&
+             data.participantName is string && data.participantName.size() >= 1 && data.participantName.size() <= 100 &&
+             data.participantRole in ['ADMIN', 'MEMBER', 'VIEWER'] &&
+             isValidUidList(data.memberUids, 50) &&
+             isValidUidList(data.adminUids, 10) &&
+             isValidUidList(data.viewerUids, 50) &&
+             data.sharePaise is int && data.sharePaise >= 0 && data.sharePaise <= 10000000000 &&
+             data.paidPaise is int && data.paidPaise >= 0 && data.paidPaise <= 10000000000 &&
+             data.percentageBps is int && data.percentageBps >= 0 && data.percentageBps <= 10000 &&
+             data.approvalStatus in ['PENDING', 'APPROVED', 'DISPUTED'] &&
+             isOptionalString(data, 'disputeReason', 400) &&
+             data.paymentStatus in ['NOT_PAID', 'PAYMENT_SUBMITTED', 'PARTIALLY_PAID', 'PAYMENT_VERIFIED', 'PAYMENT_REJECTED'] &&
+             isOptionalString(data, 'paymentNote', 300) &&
+             isOptionalString(data, 'paymentRef', 120) &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidAttachment(data) {
+      return isValidId(data.billId) &&
+             isValidId(data.groupId) &&
+             data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
+             isValidUidList(data.memberUids, 50) &&
+             isValidUidList(data.adminUids, 10) &&
+             isValidUidList(data.viewerUids, 50) &&
+             data.uploadedByUid is string && data.uploadedByUid.size() >= 1 && data.uploadedByUid.size() <= 128 &&
+             data.uploadedByName is string && data.uploadedByName.size() >= 1 && data.uploadedByName.size() <= 100 &&
+             data.fileName is string && data.fileName.size() >= 1 && data.fileName.size() <= 180 &&
+             data.mimeType in ['image/jpeg', 'image/png', 'application/pdf'] &&
+             data.fileSizeBytes is int && data.fileSizeBytes > 0 && data.fileSizeBytes <= 550000 &&
+             data.category in ['ORIGINAL_BILL', 'PAYMENT_PROOF', 'RECEIPT', 'SUPPORTING_DOC'] &&
+             data.contentBase64 is string && data.contentBase64.size() >= 1 && data.contentBase64.size() <= 750000 &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidPayment(data) {
+      return isValidId(data.billId) &&
+             isValidId(data.groupId) &&
+             isValidId(data.participantDocId) &&
+             data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
+             data.payerUid is string && data.payerUid.size() >= 1 && data.payerUid.size() <= 128 &&
+             data.payerName is string && data.payerName.size() >= 1 && data.payerName.size() <= 100 &&
+             isValidUidList(data.memberUids, 50) &&
+             isValidUidList(data.adminUids, 10) &&
+             isValidUidList(data.viewerUids, 50) &&
+             data.amountPaise is int && data.amountPaise > 0 && data.amountPaise <= 10000000000 &&
+             data.method in ['UPI', 'BANK_TRANSFER', 'CASH', 'OTHER'] &&
+             isOptionalString(data, 'upiRefId', 120) &&
+             isOptionalString(data, 'notes', 400) &&
+             isOptionalString(data, 'proofAttachmentId', 128) &&
+             data.status in ['PAYMENT_SUBMITTED', 'PARTIALLY_PAID', 'PAYMENT_VERIFIED', 'PAYMENT_REJECTED'] &&
+             isOptionalString(data, 'verifiedByUid', 128) &&
+             isOptionalString(data, 'verifiedByName', 100) &&
+             isOptionalString(data, 'rejectionReason', 300) &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidMessage(data) {
+      return isValidId(data.groupId) &&
+             data.billId is string && data.billId.size() <= 128 &&
+             data.scope in ['BILL', 'ANNOUNCEMENT'] &&
+             data.senderUid is string && data.senderUid.size() >= 1 && data.senderUid.size() <= 128 &&
+             data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 100 &&
+             data.senderRole in ['ADMIN', 'MEMBER', 'VIEWER'] &&
+             isValidUidList(data.memberUids, 50) &&
+             isValidUidList(data.adminUids, 10) &&
+             isValidUidList(data.viewerUids, 50) &&
+             data.text is string && data.text.size() >= 1 && data.text.size() <= 2000 &&
+             isOptionalString(data, 'replyToMessageId', 128) &&
+             isOptionalString(data, 'replyToSnippet', 200) &&
+             isOptionalString(data, 'attachmentId', 128) &&
+             isOptionalString(data, 'attachmentName', 180) &&
+             isValidUidList(data.readByUids, 50) &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidNotification(data) {
+      return data.recipientUid is string && data.recipientUid.size() >= 1 && data.recipientUid.size() <= 128 &&
+             data.senderUid is string && data.senderUid.size() >= 1 && data.senderUid.size() <= 128 &&
+             data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 100 &&
+             isValidId(data.groupId) &&
+             isOptionalString(data, 'billId', 128) &&
+             data.type in ['BILL_PUBLISHED', 'MEMBER_INVITED', 'BILL_APPROVED', 'BILL_DISPUTED', 'DOC_UPLOADED', 'NEW_MESSAGE', 'PAYMENT_SUBMITTED', 'PAYMENT_VERIFIED', 'PAYMENT_REMINDER', 'BILL_CLEARED', 'ANNOUNCEMENT'] &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 140 &&
+             data.body is string && data.body.size() >= 1 && data.body.size() <= 500 &&
+             data.read is bool &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidAuditLog(data) {
+      return isValidId(data.groupId) &&
+             data.billId is string && data.billId.size() <= 128 &&
+             data.actorUid is string && data.actorUid.size() >= 1 && data.actorUid.size() <= 128 &&
+             data.actorName is string && data.actorName.size() >= 1 && data.actorName.size() <= 100 &&
+             isValidUidList(data.memberUids, 50) &&
+             isValidUidList(data.adminUids, 10) &&
+             data.action in ['BILL_CREATED', 'BILL_EDITED', 'MEMBER_ADDED', 'MEMBER_REMOVED', 'BILL_APPROVED', 'BILL_DISPUTED', 'DISPUTE_RESOLVED', 'ATTACHMENT_UPLOADED', 'MESSAGE_SENT', 'ANNOUNCEMENT_SENT', 'PAYMENT_SUBMITTED', 'PAYMENT_VERIFIED', 'PAYMENT_REJECTED', 'BILL_CLEARED'] &&
+             data.summary is string && data.summary.size() >= 1 && data.summary.size() <= 500 &&
+             isValidTimestamp(data.createdAt);
+    }
+
+    // -------------------------------------------------------------------------
+    // 1. users/{userId} — Strict Owner-Only PII Isolation
+    // -------------------------------------------------------------------------
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+      allow list: if isSignedIn() && existing().userId == request.auth.uid;
+
+      allow create: if isSignedIn() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().keys().hasAll(['userId', 'displayName', 'email', 'preferredLanguage', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'displayName', 'email', 'phoneNumber', 'photoUrl', 'preferredLanguage', 'defaultUpiId', 'defaultUpiName', 'createdAt', 'updatedAt']) &&
+                       isValidUserProfile(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       isValidUserProfile(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'phoneNumber', 'photoUrl', 'preferredLanguage', 'defaultUpiId', 'defaultUpiName', 'updatedAt']);
+
+      allow delete: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+    }
+
+    // -------------------------------------------------------------------------
+    // 2. groups/{groupId}
+    // -------------------------------------------------------------------------
+    function isValidInviteJoin(groupId) {
+      let code = incoming().lastInviteCode;
+      let invPath = /databases/$(database)/documents/invitations/$(code);
+      return code is string && isValidId(code) &&
+             exists(invPath) &&
+             get(invPath).data.groupId == groupId &&
+             get(invPath).data.status == 'ACTIVE' &&
+             get(invPath).data.expiresAt > request.time &&
+             get(invPath).data.usedCount < get(invPath).data.maxUses &&
+             !(request.auth.uid in existing().memberUids) &&
+             request.auth.uid in incoming().memberUids &&
+             incoming().memberUids.size() == existing().memberUids.size() + 1 &&
+             incoming().memberUids.hasAll(existing().memberUids) &&
+             incoming().adminUids == existing().adminUids &&
+             incoming().memberCount == existing().memberCount + 1 &&
+             (
+               (get(invPath).data.role == 'VIEWER' &&
+                request.auth.uid in incoming().viewerUids &&
+                incoming().viewerUids.size() == existing().viewerUids.size() + 1 &&
+                incoming().viewerUids.hasAll(existing().viewerUids)) ||
+               (get(invPath).data.role == 'MEMBER' &&
+                incoming().viewerUids == existing().viewerUids)
+             );
+    }
+
+    match /groups/{groupId} {
+      allow get: if isSignedIn() && isValidId(groupId) && request.auth.uid in existing().memberUids;
+      allow list: if isSignedIn() && request.auth.uid in existing().memberUids;
+
+      allow create: if isSignedIn() &&
+                       isValidId(groupId) &&
+                       incoming().ownerId == request.auth.uid &&
+                       request.auth.uid in incoming().adminUids &&
+                       request.auth.uid in incoming().memberUids &&
+                       incoming().keys().hasAll(['name', 'ownerId', 'ownerName', 'memberUids', 'adminUids', 'viewerUids', 'memberCount', 'archived', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['name', 'description', 'ownerId', 'ownerName', 'upiId', 'upiRecipientName', 'memberUids', 'adminUids', 'viewerUids', 'memberCount', 'archived', 'lastInviteCode', 'createdAt', 'updatedAt']) &&
+                       isValidGroup(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(groupId) &&
+                       isValidGroup(incoming()) &&
+                       incoming().ownerId == existing().ownerId &&
+                       incoming().createdAt == existing().createdAt &&
+                       (
+                         // Action 1: Admin manages group details, UPI config, and membership
+                         (request.auth.uid in existing().adminUids &&
+                          incoming().ownerId in incoming().adminUids &&
+                          incoming().ownerId in incoming().memberUids &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'description', 'upiId', 'upiRecipientName', 'memberUids', 'adminUids', 'viewerUids', 'memberCount', 'archived', 'updatedAt'])) ||
+                         // Action 2: Invited user joins via a valid, unexpired invitation code
+                         (incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'viewerUids', 'memberCount', 'lastInviteCode', 'updatedAt']) &&
+                          isValidInviteJoin(groupId))
+                       );
+
+      allow delete: if isSignedIn() && isValidId(groupId) && existing().ownerId == request.auth.uid;
+    }
+
+    // -------------------------------------------------------------------------
+    // 3. groupMembers/{memberDocId}
+    // -------------------------------------------------------------------------
+    match /groupMembers/{memberDocId} {
+      allow get: if isSignedIn() && isValidId(memberDocId) && request.auth.uid in existing().memberUids;
+      allow list: if isSignedIn() && request.auth.uid in existing().memberUids;
+
+      allow create: if isSignedIn() &&
+                       isValidId(memberDocId) &&
+                       incoming().keys().hasAll(['groupId', 'userId', 'ownerId', 'memberUids', 'adminUids', 'displayName', 'role', 'status', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['groupId', 'userId', 'ownerId', 'memberUids', 'adminUids', 'displayName', 'phoneNumber', 'email', 'role', 'status', 'createdAt', 'updatedAt']) &&
+                       isValidGroupMember(incoming()) &&
+                       exists(/databases/$(database)/documents/groups/$(incoming().groupId)) &&
+                       (
+                         // Admin adding a member (including self on group creation)
+                         (request.auth.uid in get(/databases/$(database)/documents/groups/$(incoming().groupId)).data.adminUids) ||
+                         // Newly joined user creating their own member directory record after invite join
+                         (incoming().userId == request.auth.uid &&
+                          request.auth.uid in get(/databases/$(database)/documents/groups/$(incoming().groupId)).data.memberUids &&
+                          incoming().role in ['MEMBER', 'VIEWER'] &&
+                          (
+                            (request.auth.uid in get(/databases/$(database)/documents/groups/$(incoming().groupId)).data.viewerUids && incoming().role == 'VIEWER') ||
+                            (!(request.auth.uid in get(/databases/$(database)/documents/groups/$(incoming().groupId)).data.viewerUids) && incoming().role == 'MEMBER')
+                          ))
+                       );
+
+      allow update: if isSignedIn() &&
+                       isValidId(memberDocId) &&
+                       isValidGroupMember(incoming()) &&
+                       incoming().groupId == existing().groupId &&
+                       incoming().ownerId == existing().ownerId &&
+                       incoming().createdAt == existing().createdAt &&
+                       (
+                         // Admin updates member role, status, contact info, or synced group UIDs
+                         (request.auth.uid in existing().adminUids &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'phoneNumber', 'email', 'role', 'status', 'memberUids', 'adminUids', 'updatedAt'])) ||
+                         // Member updates their own contact info
+                         (existing().userId == request.auth.uid &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'phoneNumber', 'email', 'updatedAt']))
+                       );
+
+      allow delete: if isSignedIn() && isValidId(memberDocId) && request.auth.uid in existing().adminUids && existing().userId != existing().ownerId;
+    }
+
+    // -------------------------------------------------------------------------
+    // 4. invitations/{inviteCode}
+    // -------------------------------------------------------------------------
+    match /invitations/{inviteCode} {
+      // High-entropy invite code lookup by signed-in user; listing restricted strictly to creator
+      allow get: if isSignedIn() && isValidId(inviteCode);
+      allow list: if isSignedIn() && existing().createdBy == request.auth.uid;
+
+      allow create: if isSignedIn() &&
+                       isValidId(inviteCode) &&
+                       incoming().createdBy == request.auth.uid &&
+                       incoming().status == 'ACTIVE' &&
+                       incoming().usedCount == 0 &&
+                       incoming().expiresAt > request.time &&
+                       incoming().keys().hasAll(['groupId', 'groupName', 'role', 'createdBy', 'createdByName', 'status', 'expiresAt', 'maxUses', 'usedCount', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['groupId', 'groupName', 'role', 'createdBy', 'createdByName', 'status', 'expiresAt', 'maxUses', 'usedCount', 'createdAt', 'updatedAt']) &&
+                       isValidInvitation(incoming()) &&
+                       isGroupAdminDoc(incoming().groupId);
+
+      allow update: if isSignedIn() &&
+                       isValidId(inviteCode) &&
+                       isValidInvitation(incoming()) &&
+                       incoming().groupId == existing().groupId &&
+                       incoming().createdBy == existing().createdBy &&
+                       incoming().role == existing().role &&
+                       incoming().createdAt == existing().createdAt &&
+                       (
+                         // Action 1: Admin revokes invitation
+                         (existing().createdBy == request.auth.uid &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])) ||
+                         // Action 2: Invited user increments usedCount upon joining
+                         (existing().status == 'ACTIVE' &&
+                          existing().expiresAt > request.time &&
+                          existing().usedCount < existing().maxUses &&
+                          incoming().usedCount == existing().usedCount + 1 &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['usedCount', 'status', 'updatedAt']))
+                       );
+
+      allow delete: if isSignedIn() && isValidId(inviteCode) && existing().createdBy == request.auth.uid;
+    }
+
+    // -------------------------------------------------------------------------
+    // 5. bills/{billId}
+    // -------------------------------------------------------------------------
+    match /bills/{billId} {
+      allow get: if isSignedIn() && isValidId(billId) && request.auth.uid in existing().memberUids;
+      allow list: if isSignedIn() && request.auth.uid in existing().memberUids;
+
+      allow create: if isSignedIn() &&
+                       isValidId(billId) &&
+                       incoming().ownerId == request.auth.uid &&
+                       request.auth.uid in incoming().adminUids &&
+                       request.auth.uid in incoming().memberUids &&
+                       incoming().status in ['DRAFT', 'PUBLISHED', 'AWAITING_APPROVAL'] &&
+                       incoming().keys().hasAll(['billCode', 'groupId', 'groupName', 'ownerId', 'ownerName', 'memberUids', 'adminUids', 'viewerUids', 'title', 'category', 'totalPaise', 'collectedPaise', 'splitType', 'billDateMillis', 'dueDateMillis', 'status', 'participantCount', 'paidCount', 'approvedCount', 'disputedCount', 'aiScanned', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['billCode', 'groupId', 'groupName', 'ownerId', 'ownerName', 'memberUids', 'adminUids', 'viewerUids', 'title', 'category', 'merchantName', 'description', 'notes', 'totalPaise', 'collectedPaise', 'splitType', 'billDateMillis', 'dueDateMillis', 'status', 'upiId', 'upiRecipientName', 'participantCount', 'paidCount', 'approvedCount', 'disputedCount', 'clearanceOverrideReason', 'clearedAtMillis', 'aiScanned', 'createdAt', 'updatedAt']) &&
+                       isValidBill(incoming()) &&
+                       isGroupAdminDoc(incoming().groupId);
+
+      allow update: if isSignedIn() &&
+                       isValidId(billId) &&
+                       isValidBill(incoming()) &&
+                       existing().status != 'CLEARED' && // Terminal state locking
+                       incoming().billCode == existing().billCode &&
+                       incoming().groupId == existing().groupId &&
+                       incoming().ownerId == existing().ownerId &&
+                       incoming().createdAt == existing().createdAt &&
+                       (
+                         // Action 1: Admin edits bill, resolves disputes, updates rollups, or clears bill
+                         // Clearance gate: cannot set CLEARED with outstanding balance unless override reason provided
+                         (request.auth.uid in existing().adminUids &&
+                          (incoming().status != 'CLEARED' ||
+                           incoming().collectedPaise >= incoming().totalPaise ||
+                           ('clearanceOverrideReason' in incoming() && incoming().clearanceOverrideReason is string && incoming().clearanceOverrideReason.size() >= 5)) &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['title', 'category', 'merchantName', 'description', 'notes', 'totalPaise', 'collectedPaise', 'splitType', 'billDateMillis', 'dueDateMillis', 'status', 'upiId', 'upiRecipientName', 'memberUids', 'adminUids', 'viewerUids', 'participantCount', 'paidCount', 'approvedCount', 'disputedCount', 'clearanceOverrideReason', 'clearedAtMillis', 'updatedAt'])) ||
+                         // Action 2: Non-viewer member updates approval/dispute counters & lifecycle status (never CLEARED)
+                         (request.auth.uid in existing().memberUids &&
+                          !(request.auth.uid in existing().viewerUids) &&
+                          incoming().status in ['AWAITING_APPROVAL', 'APPROVED', 'DISPUTED', 'PAYMENT_IN_PROGRESS'] &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['approvedCount', 'disputedCount', 'status', 'updatedAt']))
+                       );
+
+      allow delete: if isSignedIn() && isValidId(billId) && request.auth.uid in existing().adminUids && existing().status == 'DRAFT';
+    }
+
+    // -------------------------------------------------------------------------
+    // 6. billParticipants/{participantDocId}
+    // -------------------------------------------------------------------------
+    match /billParticipants/{participantDocId} {
+      allow get: if isSignedIn() && isValidId(participantDocId) && request.auth.uid in existing().memberUids;
+      allow list: if isSignedIn() && request.auth.uid in existing().memberUids;
+
+      allow create: if isSignedIn() &&
+                       isValidId(participantDocId) &&
+                       request.auth.uid in incoming().adminUids &&
+                       incoming().keys().hasAll(['billId', 'groupId', 'ownerId', 'participantUid', 'participantName', 'participantRole', 'memberUids', 'adminUids', 'viewerUids', 'sharePaise', 'paidPaise', 'percentageBps', 'approvalStatus', 'paymentStatus', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['billId', 'groupId', 'ownerId', 'participantUid', 'participantName', 'participantRole', 'memberUids', 'adminUids', 'viewerUids', 'sharePaise', 'paidPaise', 'percentageBps', 'approvalStatus', 'disputeReason', 'paymentStatus', 'paymentNote', 'paymentRef', 'createdAt', 'updatedAt']) &&
+                       isValidBillParticipant(incoming()) &&
+                       exists(/databases/$(database)/documents/bills/$(incoming().billId));
+
+      allow update: if isSignedIn() &&
+                       isValidId(participantDocId) &&
+                       isValidBillParticipant(incoming()) &&
+                       incoming().billId == existing().billId &&
+                       incoming().groupId == existing().groupId &&
+                       incoming().ownerId == existing().ownerId &&
+                       incoming().participantUid == existing().participantUid &&
+                       incoming().createdAt == existing().createdAt &&
+                       (
+                         // Action 1: Admin verifies/rejects payment, edits share, or resolves dispute
+                         (request.auth.uid in existing().adminUids &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['sharePaise', 'paidPaise', 'percentageBps', 'approvalStatus', 'disputeReason', 'paymentStatus', 'paymentNote', 'paymentRef', 'memberUids', 'adminUids', 'viewerUids', 'updatedAt'])) ||
+                         // Action 2: Non-viewer participant approves or disputes their share
+                         (existing().participantUid == request.auth.uid &&
+                          !(request.auth.uid in existing().viewerUids) &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['approvalStatus', 'disputeReason', 'updatedAt'])) ||
+                         // Action 3: Non-viewer participant submits payment (CANNOT mark PAYMENT_VERIFIED!)
+                         (existing().participantUid == request.auth.uid &&
+                          !(request.auth.uid in existing().viewerUids) &&
+                          incoming().paymentStatus == 'PAYMENT_SUBMITTED' &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['paymentStatus', 'paymentNote', 'paymentRef', 'updatedAt']))
+                       );
+
+      allow delete: if isSignedIn() && isValidId(participantDocId) && request.auth.uid in existing().adminUids;
+    }
+
+    // -------------------------------------------------------------------------
+    // 7. attachments/{attachmentId}
+    // -------------------------------------------------------------------------
+    match /attachments/{attachmentId} {
+      allow get: if isSignedIn() && isValidId(attachmentId) && request.auth.uid in existing().memberUids;
+      allow list: if isSignedIn() && request.auth.uid in existing().memberUids;
+
+      allow create: if isSignedIn() &&
+                       isValidId(attachmentId) &&
+                       incoming().uploadedByUid == request.auth.uid &&
+                       request.auth.uid in incoming().memberUids &&
+                       !(request.auth.uid in incoming().viewerUids) &&
+                       incoming().keys().hasAll(['billId', 'groupId', 'ownerId', 'memberUids', 'adminUids', 'viewerUids', 'uploadedByUid', 'uploadedByName', 'fileName', 'mimeType', 'fileSizeBytes', 'category', 'contentBase64', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['billId', 'groupId', 'ownerId', 'memberUids', 'adminUids', 'viewerUids', 'uploadedByUid', 'uploadedByName', 'fileName', 'mimeType', 'fileSizeBytes', 'category', 'contentBase64', 'createdAt', 'updatedAt']) &&
+                       isValidAttachment(incoming()) &&
+                       exists(/databases/$(database)/documents/bills/$(incoming().billId));
+
+      allow update: if false;
+
+      allow delete: if isSignedIn() && isValidId(attachmentId) &&
+                       (existing().uploadedByUid == request.auth.uid || request.auth.uid in existing().adminUids);
+    }
+
+    // -------------------------------------------------------------------------
+    // 8. payments/{paymentId}
+    // -------------------------------------------------------------------------
+    match /payments/{paymentId} {
+      allow get: if isSignedIn() && isValidId(paymentId) && request.auth.uid in existing().memberUids;
+      allow list: if isSignedIn() && request.auth.uid in existing().memberUids;
+
+      allow create: if isSignedIn() &&
+                       isValidId(paymentId) &&
+                       request.auth.uid in incoming().memberUids &&
+                       !(request.auth.uid in incoming().viewerUids) &&
+                       (
+                         (incoming().payerUid == request.auth.uid && incoming().status == 'PAYMENT_SUBMITTED') ||
+                         (request.auth.uid in incoming().adminUids)
+                       ) &&
+                       incoming().keys().hasAll(['billId', 'groupId', 'participantDocId', 'ownerId', 'payerUid', 'payerName', 'memberUids', 'adminUids', 'viewerUids', 'amountPaise', 'method', 'status', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['billId', 'groupId', 'participantDocId', 'ownerId', 'payerUid', 'payerName', 'memberUids', 'adminUids', 'viewerUids', 'amountPaise', 'method', 'upiRefId', 'notes', 'proofAttachmentId', 'status', 'verifiedByUid', 'verifiedByName', 'rejectionReason', 'createdAt', 'updatedAt']) &&
+                       isValidPayment(incoming()) &&
+                       exists(/databases/$(database)/documents/bills/$(incoming().billId));
+
+      // Only Admin can verify, partially verify, or reject submitted payments
+      allow update: if isSignedIn() &&
+                       isValidId(paymentId) &&
+                       isValidPayment(incoming()) &&
+                       request.auth.uid in existing().adminUids &&
+                       incoming().billId == existing().billId &&
+                       incoming().groupId == existing().groupId &&
+                       incoming().payerUid == existing().payerUid &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['status', 'amountPaise', 'verifiedByUid', 'verifiedByName', 'rejectionReason', 'updatedAt']);
+
+      allow delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // 9. messages/{messageId}
+    // -------------------------------------------------------------------------
+    match /messages/{messageId} {
+      allow get: if isSignedIn() && isValidId(messageId) && request.auth.uid in existing().memberUids;
+      allow list: if isSignedIn() && request.auth.uid in existing().memberUids;
+
+      allow create: if isSignedIn() &&
+                       isValidId(messageId) &&
+                       incoming().senderUid == request.auth.uid &&
+                       request.auth.uid in incoming().memberUids &&
+                       !(request.auth.uid in incoming().viewerUids) &&
+                       (
+                         (incoming().scope == 'BILL' && incoming().billId.size() > 0) ||
+                         (incoming().scope == 'ANNOUNCEMENT' && request.auth.uid in incoming().adminUids)
+                       ) &&
+                       incoming().keys().hasAll(['groupId', 'billId', 'scope', 'senderUid', 'senderName', 'senderRole', 'memberUids', 'adminUids', 'viewerUids', 'text', 'readByUids', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['groupId', 'billId', 'scope', 'senderUid', 'senderName', 'senderRole', 'memberUids', 'adminUids', 'viewerUids', 'text', 'replyToMessageId', 'replyToSnippet', 'attachmentId', 'attachmentName', 'readByUids', 'createdAt', 'updatedAt']) &&
+                       isValidMessage(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(messageId) &&
+                       isValidMessage(incoming()) &&
+                       request.auth.uid in existing().memberUids &&
+                       incoming().senderUid == existing().senderUid &&
+                       incoming().text == existing().text &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['readByUids', 'updatedAt']);
+
+      allow delete: if isSignedIn() && isValidId(messageId) &&
+                       (existing().senderUid == request.auth.uid || request.auth.uid in existing().adminUids);
+    }
+
+    // -------------------------------------------------------------------------
+    // 10. notifications/{notificationId}
+    // -------------------------------------------------------------------------
+    match /notifications/{notificationId} {
+      allow get: if isSignedIn() && isValidId(notificationId) && existing().recipientUid == request.auth.uid;
+      allow list: if isSignedIn() && existing().recipientUid == request.auth.uid;
+
+      allow create: if isSignedIn() &&
+                       isValidId(notificationId) &&
+                       incoming().senderUid == request.auth.uid &&
+                       incoming().read == false &&
+                       incoming().keys().hasAll(['recipientUid', 'senderUid', 'senderName', 'groupId', 'type', 'title', 'body', 'read', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['recipientUid', 'senderUid', 'senderName', 'groupId', 'billId', 'type', 'title', 'body', 'read', 'createdAt', 'updatedAt']) &&
+                       isValidNotification(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(notificationId) &&
+                       isValidNotification(incoming()) &&
+                       existing().recipientUid == request.auth.uid &&
+                       incoming().recipientUid == existing().recipientUid &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['read', 'updatedAt']);
+
+      allow delete: if isSignedIn() && isValidId(notificationId) && existing().recipientUid == request.auth.uid;
+    }
+
+    // -------------------------------------------------------------------------
+    // 11. auditLogs/{logId} — Strictly Append-Only & Immutable
+    // -------------------------------------------------------------------------
+    match /auditLogs/{logId} {
+      allow get: if isSignedIn() && isValidId(logId) && request.auth.uid in existing().memberUids;
+      allow list: if isSignedIn() && request.auth.uid in existing().memberUids;
+
+      allow create: if isSignedIn() &&
+                       isValidId(logId) &&
+                       incoming().actorUid == request.auth.uid &&
+                       request.auth.uid in incoming().memberUids &&
+                       incoming().keys().hasAll(['groupId', 'billId', 'actorUid', 'actorName', 'memberUids', 'adminUids', 'action', 'summary', 'createdAt']) &&
+                       incoming().keys().hasOnly(['groupId', 'billId', 'actorUid', 'actorName', 'memberUids', 'adminUids', 'action', 'summary', 'createdAt']) &&
+                       isValidAuditLog(incoming());
+
+      allow update: if false;
+      allow delete: if false;
+    }
+  }
+}

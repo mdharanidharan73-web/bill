@@ -1,0 +1,306 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Authenticated user profile and personal UPI/language preferences (strictly owner-isolated PII).",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Firebase Auth UID of the user." },
+        "displayName": { "type": "string", "description": "Full display name." },
+        "email": { "type": "string", "description": "Verified Google account email." },
+        "phoneNumber": { "type": "string", "description": "Optional mobile number." },
+        "photoUrl": { "type": "string", "description": "Optional profile photo URL." },
+        "preferredLanguage": { "type": "string", "enum": ["en", "kn", "ta"], "description": "UI language code." },
+        "defaultUpiId": { "type": "string", "description": "Optional default UPI ID for receiving payments." },
+        "defaultUpiName": { "type": "string", "description": "Optional default UPI recipient name." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp (FieldValue.serverTimestamp())." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp (FieldValue.serverTimestamp())." }
+      },
+      "required": ["userId", "displayName", "email", "preferredLanguage", "createdAt", "updatedAt"]
+    },
+    "Group": {
+      "title": "Group",
+      "description": "A shared expense group managed by an administrator with members and viewers.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "ownerName": { "type": "string" },
+        "upiId": { "type": "string" },
+        "upiRecipientName": { "type": "string" },
+        "memberUids": { "type": "array" },
+        "adminUids": { "type": "array" },
+        "viewerUids": { "type": "array" },
+        "memberCount": { "type": "integer" },
+        "archived": { "type": "boolean" },
+        "lastInviteCode": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "ownerId", "ownerName", "memberUids", "adminUids", "viewerUids", "memberCount", "archived", "createdAt", "updatedAt"]
+    },
+    "GroupMember": {
+      "title": "GroupMember",
+      "description": "Membership record with role and status for a user or managed family member inside a group.",
+      "type": "object",
+      "properties": {
+        "groupId": { "type": "string" },
+        "userId": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "memberUids": { "type": "array" },
+        "adminUids": { "type": "array" },
+        "displayName": { "type": "string" },
+        "phoneNumber": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["ADMIN", "MEMBER", "VIEWER"] },
+        "status": { "type": "string", "enum": ["ACTIVE", "INACTIVE"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["groupId", "userId", "ownerId", "memberUids", "adminUids", "displayName", "role", "status", "createdAt", "updatedAt"]
+    },
+    "Invitation": {
+      "title": "Invitation",
+      "description": "Expiring group invite code with role binding and usage cap.",
+      "type": "object",
+      "properties": {
+        "groupId": { "type": "string" },
+        "groupName": { "type": "string" },
+        "role": { "type": "string", "enum": ["MEMBER", "VIEWER"] },
+        "createdBy": { "type": "string" },
+        "createdByName": { "type": "string" },
+        "status": { "type": "string", "enum": ["ACTIVE", "USED", "REVOKED"] },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "maxUses": { "type": "integer" },
+        "usedCount": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["groupId", "groupName", "role", "createdBy", "createdByName", "status", "expiresAt", "maxUses", "usedCount", "createdAt", "updatedAt"]
+    },
+    "Bill": {
+      "title": "Bill",
+      "description": "Shared bill with integer paise totals, lifecycle state, split type, and UPI details.",
+      "type": "object",
+      "properties": {
+        "billCode": { "type": "string" },
+        "groupId": { "type": "string" },
+        "groupName": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "ownerName": { "type": "string" },
+        "memberUids": { "type": "array" },
+        "adminUids": { "type": "array" },
+        "viewerUids": { "type": "array" },
+        "title": { "type": "string" },
+        "category": { "type": "string" },
+        "merchantName": { "type": "string" },
+        "description": { "type": "string" },
+        "notes": { "type": "string" },
+        "totalPaise": { "type": "integer" },
+        "collectedPaise": { "type": "integer" },
+        "splitType": { "type": "string", "enum": ["EQUAL", "CUSTOM", "PERCENTAGE"] },
+        "billDateMillis": { "type": "integer" },
+        "dueDateMillis": { "type": "integer" },
+        "status": { "type": "string", "enum": ["DRAFT", "PUBLISHED", "AWAITING_APPROVAL", "APPROVED", "DISPUTED", "PAYMENT_IN_PROGRESS", "CLEARED"] },
+        "upiId": { "type": "string" },
+        "upiRecipientName": { "type": "string" },
+        "participantCount": { "type": "integer" },
+        "paidCount": { "type": "integer" },
+        "approvedCount": { "type": "integer" },
+        "disputedCount": { "type": "integer" },
+        "clearanceOverrideReason": { "type": "string" },
+        "clearedAtMillis": { "type": "integer" },
+        "aiScanned": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["billCode", "groupId", "groupName", "ownerId", "ownerName", "memberUids", "adminUids", "viewerUids", "title", "category", "totalPaise", "collectedPaise", "splitType", "billDateMillis", "dueDateMillis", "status", "participantCount", "paidCount", "approvedCount", "disputedCount", "aiScanned", "createdAt", "updatedAt"]
+    },
+    "BillParticipant": {
+      "title": "BillParticipant",
+      "description": "Individual member share, approval state, and payment verification status for a bill.",
+      "type": "object",
+      "properties": {
+        "billId": { "type": "string" },
+        "groupId": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "participantUid": { "type": "string" },
+        "participantName": { "type": "string" },
+        "participantRole": { "type": "string", "enum": ["ADMIN", "MEMBER", "VIEWER"] },
+        "memberUids": { "type": "array" },
+        "adminUids": { "type": "array" },
+        "viewerUids": { "type": "array" },
+        "sharePaise": { "type": "integer" },
+        "paidPaise": { "type": "integer" },
+        "percentageBps": { "type": "integer" },
+        "approvalStatus": { "type": "string", "enum": ["PENDING", "APPROVED", "DISPUTED"] },
+        "disputeReason": { "type": "string" },
+        "paymentStatus": { "type": "string", "enum": ["NOT_PAID", "PAYMENT_SUBMITTED", "PARTIALLY_PAID", "PAYMENT_VERIFIED", "PAYMENT_REJECTED"] },
+        "paymentNote": { "type": "string" },
+        "paymentRef": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["billId", "groupId", "ownerId", "participantUid", "participantName", "participantRole", "memberUids", "adminUids", "viewerUids", "sharePaise", "paidPaise", "percentageBps", "approvalStatus", "paymentStatus", "createdAt", "updatedAt"]
+    },
+    "Attachment": {
+      "title": "Attachment",
+      "description": "Shared bill receipt, payment proof, or PDF document accessible strictly to bill participants.",
+      "type": "object",
+      "properties": {
+        "billId": { "type": "string" },
+        "groupId": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "memberUids": { "type": "array" },
+        "adminUids": { "type": "array" },
+        "viewerUids": { "type": "array" },
+        "uploadedByUid": { "type": "string" },
+        "uploadedByName": { "type": "string" },
+        "fileName": { "type": "string" },
+        "mimeType": { "type": "string", "enum": ["image/jpeg", "image/png", "application/pdf"] },
+        "fileSizeBytes": { "type": "integer" },
+        "category": { "type": "string", "enum": ["ORIGINAL_BILL", "PAYMENT_PROOF", "RECEIPT", "SUPPORTING_DOC"] },
+        "contentBase64": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["billId", "groupId", "ownerId", "memberUids", "adminUids", "viewerUids", "uploadedByUid", "uploadedByName", "fileName", "mimeType", "fileSizeBytes", "category", "contentBase64", "createdAt", "updatedAt"]
+    },
+    "Payment": {
+      "title": "Payment",
+      "description": "Payment submission and manual administrator verification record.",
+      "type": "object",
+      "properties": {
+        "billId": { "type": "string" },
+        "groupId": { "type": "string" },
+        "participantDocId": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "payerUid": { "type": "string" },
+        "payerName": { "type": "string" },
+        "memberUids": { "type": "array" },
+        "adminUids": { "type": "array" },
+        "viewerUids": { "type": "array" },
+        "amountPaise": { "type": "integer" },
+        "method": { "type": "string", "enum": ["UPI", "BANK_TRANSFER", "CASH", "OTHER"] },
+        "upiRefId": { "type": "string" },
+        "notes": { "type": "string" },
+        "proofAttachmentId": { "type": "string" },
+        "status": { "type": "string", "enum": ["PAYMENT_SUBMITTED", "PARTIALLY_PAID", "PAYMENT_VERIFIED", "PAYMENT_REJECTED"] },
+        "verifiedByUid": { "type": "string" },
+        "verifiedByName": { "type": "string" },
+        "rejectionReason": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["billId", "groupId", "participantDocId", "ownerId", "payerUid", "payerName", "memberUids", "adminUids", "viewerUids", "amountPaise", "method", "status", "createdAt", "updatedAt"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Real-time bill discussion message or administrator group announcement.",
+      "type": "object",
+      "properties": {
+        "groupId": { "type": "string" },
+        "billId": { "type": "string" },
+        "scope": { "type": "string", "enum": ["BILL", "ANNOUNCEMENT"] },
+        "senderUid": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderRole": { "type": "string", "enum": ["ADMIN", "MEMBER", "VIEWER"] },
+        "memberUids": { "type": "array" },
+        "adminUids": { "type": "array" },
+        "viewerUids": { "type": "array" },
+        "text": { "type": "string" },
+        "replyToMessageId": { "type": "string" },
+        "replyToSnippet": { "type": "string" },
+        "attachmentId": { "type": "string" },
+        "attachmentName": { "type": "string" },
+        "readByUids": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["groupId", "billId", "scope", "senderUid", "senderName", "senderRole", "memberUids", "adminUids", "viewerUids", "text", "readByUids", "createdAt", "updatedAt"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Per-user in-app notification for bill events, messages, and payment reminders.",
+      "type": "object",
+      "properties": {
+        "recipientUid": { "type": "string" },
+        "senderUid": { "type": "string" },
+        "senderName": { "type": "string" },
+        "groupId": { "type": "string" },
+        "billId": { "type": "string" },
+        "type": { "type": "string", "enum": ["BILL_PUBLISHED", "MEMBER_INVITED", "BILL_APPROVED", "BILL_DISPUTED", "DOC_UPLOADED", "NEW_MESSAGE", "PAYMENT_SUBMITTED", "PAYMENT_VERIFIED", "PAYMENT_REMINDER", "BILL_CLEARED", "ANNOUNCEMENT"] },
+        "title": { "type": "string" },
+        "body": { "type": "string" },
+        "read": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["recipientUid", "senderUid", "senderName", "groupId", "type", "title", "body", "read", "createdAt", "updatedAt"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Append-only immutable financial audit log record.",
+      "type": "object",
+      "properties": {
+        "groupId": { "type": "string" },
+        "billId": { "type": "string" },
+        "actorUid": { "type": "string" },
+        "actorName": { "type": "string" },
+        "memberUids": { "type": "array" },
+        "adminUids": { "type": "array" },
+        "action": { "type": "string", "enum": ["BILL_CREATED", "BILL_EDITED", "MEMBER_ADDED", "MEMBER_REMOVED", "BILL_APPROVED", "BILL_DISPUTED", "DISPUTE_RESOLVED", "ATTACHMENT_UPLOADED", "MESSAGE_SENT", "ANNOUNCEMENT_SENT", "PAYMENT_SUBMITTED", "PAYMENT_VERIFIED", "PAYMENT_REJECTED", "BILL_CLEARED"] },
+        "summary": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["groupId", "billId", "actorUid", "actorName", "memberUids", "adminUids", "action", "summary", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Owner-isolated user profile documents."
+    },
+    "/groups/{groupId}": {
+      "schema": { "$ref": "#/entities/Group" },
+      "description": "Shared bill groups with membership and role UID lists."
+    },
+    "/groupMembers/{memberDocId}": {
+      "schema": { "$ref": "#/entities/GroupMember" },
+      "description": "Group member directory entries with roles and active status."
+    },
+    "/invitations/{inviteCode}": {
+      "schema": { "$ref": "#/entities/Invitation" },
+      "description": "Expiring group invitation codes."
+    },
+    "/bills/{billId}": {
+      "schema": { "$ref": "#/entities/Bill" },
+      "description": "Shared bills with paise totals and lifecycle status."
+    },
+    "/billParticipants/{participantDocId}": {
+      "schema": { "$ref": "#/entities/BillParticipant" },
+      "description": "Individual member share, approval, and payment status per bill."
+    },
+    "/attachments/{attachmentId}": {
+      "schema": { "$ref": "#/entities/Attachment" },
+      "description": "Shared receipts, bills, and payment proof documents."
+    },
+    "/payments/{paymentId}": {
+      "schema": { "$ref": "#/entities/Payment" },
+      "description": "Payment submission and verification records."
+    },
+    "/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/Message" },
+      "description": "Real-time bill discussions and group announcements."
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/Notification" },
+      "description": "Per-user in-app notifications."
+    },
+    "/auditLogs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Immutable financial audit log records."
+    }
+  }
+}

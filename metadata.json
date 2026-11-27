@@ -1,0 +1,6 @@
+{
+  "name": "BillCircle",
+  "description": "Shared bill & expense management platform with equal/custom paise-accurate splitting, multi-user approvals, real-time messaging, receipt sharing, UPI payments, AI bill scanning, and financial reports.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
