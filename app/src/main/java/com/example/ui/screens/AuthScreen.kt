@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.credentials.CredentialManager
 import com.example.R
 import com.example.data.attemptAutoSignIn
+import com.example.data.checkFirebaseConfigStatus
 import com.example.data.onGoogleSignInClicked
 import com.example.ui.i18n.AppLanguage
 import com.example.ui.i18n.LocalAppStrings
@@ -47,6 +48,7 @@ fun AuthScreen(
 
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    val firebaseStatus = remember(context) { checkFirebaseConfigStatus(context) }
 
     LaunchedEffect(Unit) {
         attemptAutoSignIn(
@@ -178,6 +180,33 @@ fun AuthScreen(
                 )
             }
 
+            if (!firebaseStatus.isFullyConfigured) {
+                val configWarning = if (!firebaseStatus.firebaseAppInitialized) {
+                    "Firebase configuration is missing in this build. Add app/google-services.json for com.aistudio.billcircle.vkmqrx (or set GOOGLE_SERVICES_JSON in GitHub Secrets) and rebuild."
+                } else {
+                    "Google Sign-In Web Client ID (default_web_client_id) is missing. Enable Google Sign-In and add your signing SHA-1/SHA-256 in Firebase Console, then update google-services.json."
+                }
+                Card(
+                    modifier = Modifier.fillMaxWidth().widthIn(max = 560.dp),
+                    colors = CardDefaults.cardColors(containerColor = ext.warningContainer),
+                    border = BorderStroke(1.dp, ext.warning.copy(alpha = 0.45f)),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(Icons.Filled.WarningAmber, contentDescription = null, tint = ext.warning)
+                        Text(
+                            text = configWarning,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+
             if (errorMessage != null) {
                 Card(
                     modifier = Modifier.fillMaxWidth().widthIn(max = 560.dp),
@@ -221,7 +250,7 @@ fun AuthScreen(
                         }
                     )
                 },
-                enabled = !isLoading,
+                enabled = !isLoading && firebaseStatus.isFullyConfigured,
                 shape = RoundedCornerShape(16.dp),
                 modifier = Modifier
                     .fillMaxWidth()

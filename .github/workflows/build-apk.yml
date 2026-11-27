@@ -2,24 +2,36 @@ name: Build BillCircle APK
 
 on:
   push:
+    branches:
+      - main
   pull_request:
+    branches:
+      - main
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build-apk:
+    name: Build & Verify BillCircle Debug APK
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repository
+        id: checkout
         uses: actions/checkout@v4
 
       - name: Set up JDK 21
+        id: jdk
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
 
-      - name: Set up Android SDK and install API 36.1
+      - name: Configure Android SDK and command-line tools
+        id: android_sdk_env
         shell: bash
         run: |
           set -euo pipefail
@@ -31,15 +43,15 @@ jobs:
           SDKMANAGER=""
           if [ -x "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
             SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-          else
-            FOUND="$(find "$SDK_ROOT/cmdline-tools" -maxdepth 3 -name sdkmanager -type f 2>/dev/null | head -n 1 || true)"
+          elif [ -d "$SDK_ROOT/cmdline-tools" ]; then
+            FOUND="$(find "$SDK_ROOT/cmdline-tools" -maxdepth 3 -name sdkmanager -type f 2>/dev/null | head -n 1)"
             if [ -n "$FOUND" ] && [ -x "$FOUND" ]; then
               SDKMANAGER="$FOUND"
             fi
           fi
 
           if [ -z "$SDKMANAGER" ]; then
-            echo "Installing Android command-line tools..."
+            echo "Downloading Android SDK command-line tools (cmdline-tools)..."
             TMP_ZIP="$(mktemp /tmp/cmdline-tools.XXXXXX.zip)"
             TMP_DIR="$(mktemp -d /tmp/cmdline-tools-extract.XXXXXX)"
             curl -fsSL "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip" -o "$TMP_ZIP"
@@ -51,52 +63,180 @@ jobs:
             SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
           fi
 
+          if [ ! -x "$SDKMANAGER" ]; then
+            echo "::error::sdkmanager executable not found under $SDK_ROOT"
+            exit 1
+          fi
+
+          echo "SDKMANAGER_BIN=$SDKMANAGER" >> "$GITHUB_ENV"
           echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
           echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+          echo "Using sdkmanager at: $SDKMANAGER"
 
-          set +o pipefail
-          yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses > /dev/null || true
-          set -o pipefail
+      - name: Cache Android SDK packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.ANDROID_HOME }}/platforms/android-36.1
+            ${{ env.ANDROID_HOME }}/build-tools/36.0.0
+            ${{ env.ANDROID_HOME }}/licenses
+          key: android-sdk-${{ runner.os }}-36.1-bt36.0.0-${{ hashFiles('app/build.gradle.kts', 'gradle/libs.versions.toml') }}
 
-          "$SDKMANAGER" --sdk_root="$SDK_ROOT" --install \
-            "platform-tools" \
-            "platforms;android-36" \
-            "platforms;android-36.1" \
-            "build-tools;36.0.0"
+      - name: Accept Android SDK licenses
+        id: android_licenses
+        shell: bash
+        run: |
+          set -euo pipefail
+          # `yes` exits with SIGPIPE (141) when sdkmanager closes stdin; fail if sdkmanager itself fails.
+          yes | "$SDKMANAGER_BIN" --sdk_root="$ANDROID_SDK_ROOT" --licenses >/dev/null || {
+            rc_yes="${PIPESTATUS[0]:-0}"
+            rc_sdk="${PIPESTATUS[1]:-1}"
+            if [ "$rc_sdk" -ne 0 ]; then
+              echo "::error::sdkmanager --licenses failed with exit code $rc_sdk"
+              exit "$rc_sdk"
+            fi
+            if [ "$rc_yes" -ne 0 ] && [ "$rc_yes" -ne 141 ]; then
+              echo "::error::yes pipeline failed unexpectedly with exit code $rc_yes"
+              exit "$rc_yes"
+            fi
+          }
+          echo "Android SDK licenses accepted."
 
-          set +o pipefail
-          yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses > /dev/null || true
+      - name: Install and verify Android SDK packages
+        id: android_sdk_install
+        shell: bash
+        run: |
+          set -euo pipefail
+          AVAILABLE="$("$SDKMANAGER_BIN" --sdk_root="$ANDROID_SDK_ROOT" --list)"
+
+          PLATFORM_PKG="platforms;android-36.1"
+          BUILD_TOOLS_PKG="build-tools;36.0.0"
+          PLATFORM_TOOLS_PKG="platform-tools"
+
+          for pkg in "$PLATFORM_TOOLS_PKG" "$PLATFORM_PKG" "$BUILD_TOOLS_PKG"; do
+            if ! grep -Fq "$pkg" <<< "$AVAILABLE"; then
+              echo "::error::Required Android SDK package '$pkg' was not found in sdkmanager --list"
+              exit 1
+            fi
+          done
+
+          "$SDKMANAGER_BIN" --sdk_root="$ANDROID_SDK_ROOT" --install \
+            "$PLATFORM_TOOLS_PKG" \
+            "$PLATFORM_PKG" \
+            "$BUILD_TOOLS_PKG"
+
+          echo "=== Installed Android SDK Packages ==="
+          "$SDKMANAGER_BIN" --sdk_root="$ANDROID_SDK_ROOT" --list_installed
+
+          test -f "$ANDROID_SDK_ROOT/platforms/android-36.1/android.jar"
+          test -f "$ANDROID_SDK_ROOT/platforms/android-36.1/package.xml"
+          test -x "$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt2"
+          test -x "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner"
+          test -x "$ANDROID_SDK_ROOT/platform-tools/adb"
+
+          echo "$ANDROID_SDK_ROOT/build-tools/36.0.0" >> "$GITHUB_PATH"
+          echo "SDK_PLATFORM_PKG=$PLATFORM_PKG" >> "$GITHUB_ENV"
+          echo "BUILD_TOOLS_PKG=$BUILD_TOOLS_PKG" >> "$GITHUB_ENV"
 
       - name: Set up Gradle 9.3.1
+        id: gradle_setup
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
 
-      - name: Configure Firebase google-services.json
+      - name: Restore and validate Firebase configuration
+        id: firebase_config
         shell: bash
         env:
           GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
         run: |
+          set -euo pipefail
+          SOURCE_MODE="none"
           if [ -n "$GOOGLE_SERVICES_JSON" ]; then
-            if printf '%s' "$GOOGLE_SERVICES_JSON" | grep -q '^{'; then
+            if printf '%s' "$GOOGLE_SERVICES_JSON" | grep -q '^[[:space:]]*{'; then
               printf '%s' "$GOOGLE_SERVICES_JSON" > app/google-services.json
             else
               printf '%s' "$GOOGLE_SERVICES_JSON" | tr -d '\r\n ' | base64 -d > app/google-services.json
             fi
-            echo "Restored app/google-services.json from GitHub Actions secret."
+            SOURCE_MODE="GitHub Actions secret (GOOGLE_SERVICES_JSON)"
           elif [ -s app/google-services.json ]; then
-            echo "Using repository app/google-services.json."
-          else
-            echo "::warning::app/google-services.json is not present and GOOGLE_SERVICES_JSON secret is unset. Building APK without Firebase config (Google Sign-In will fail gracefully at runtime)."
+            SOURCE_MODE="Repository file (app/google-services.json)"
           fi
 
+          if [ "$SOURCE_MODE" = "none" ]; then
+            echo "Firebase JSON found: NO"
+            echo "Configuration source: None (app/google-services.json missing and GOOGLE_SERVICES_JSON secret unset)"
+            echo "Package name validation: Not applicable (unconfigured)"
+            echo "JSON parsing result: Not applicable (unconfigured)"
+            echo "::warning::Firebase configuration is missing (app/google-services.json not found and GOOGLE_SERVICES_JSON secret is unset). Google Sign-In and Firestore will NOT work in this APK."
+            echo "FIREBASE_CONFIGURED=false" >> "$GITHUB_ENV"
+            echo "FIREBASE_STATUS=Not configured (Firebase Auth & Firestore disabled at runtime)" >> "$GITHUB_ENV"
+            echo "GOOGLE_SERVICES_RES_STATUS=Not generated (google-services.json missing)" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          echo "Firebase JSON found: YES"
+          echo "Configuration source: $SOURCE_MODE"
+
+          python3 - "$SOURCE_MODE" << 'PYEOF'
+          import json, sys
+
+          source_mode = sys.argv[1]
+          path = "app/google-services.json"
+          try:
+              with open(path, "r", encoding="utf-8") as f:
+                  data = json.load(f)
+              print("JSON parsing result: VALID JSON")
+          except Exception as exc:
+              print("JSON parsing result: FAILED")
+              print(f"::error::Invalid JSON in {path} (source: {source_mode}): {exc}")
+              sys.exit(1)
+
+          if not isinstance(data, dict) or not data.get("project_info", {}).get("project_id"):
+              print(f"::error::{path} is missing project_info.project_id")
+              sys.exit(1)
+
+          clients = data.get("client") or []
+          expected_pkg = "com.aistudio.billcircle.vkmqrx"
+          matched = None
+          for c in clients:
+              pkg = c.get("client_info", {}).get("android_client_info", {}).get("package_name")
+              if pkg == expected_pkg:
+                  matched = c
+                  break
+
+          if not matched:
+              print(f"Package name validation: FAILED (expected {expected_pkg})")
+              print(f"::error::{path} does not contain an Android client matching package_name '{expected_pkg}'")
+              sys.exit(1)
+
+          print(f"Package name validation: PASSED ({expected_pkg})")
+
+          mobilesdk_id = matched.get("client_info", {}).get("mobilesdk_app_id", "")
+          api_keys = matched.get("api_key") or []
+          if not mobilesdk_id or not api_keys or not api_keys[0].get("current_key"):
+              print(f"::error::{path} Android client for '{expected_pkg}' is missing mobilesdk_app_id or api_key")
+              sys.exit(1)
+
+          oauth_clients = matched.get("oauth_client") or []
+          has_web_client = any(o.get("client_type") == 3 and o.get("client_id") for o in oauth_clients)
+          print(f"Web OAuth client (client_type=3) present: {'YES' if has_web_client else 'NO'}")
+          if not has_web_client:
+              print(f"::warning::{path} has no Web OAuth client (client_type=3). Enable Google Sign-In in Firebase Console so default_web_client_id can be generated.")
+          PYEOF
+
+          echo "FIREBASE_CONFIGURED=true" >> "$GITHUB_ENV"
+          echo "FIREBASE_STATUS=Configured and validated ($SOURCE_MODE)" >> "$GITHUB_ENV"
+
       - name: Prepare debug keystore
+        id: keystore
         shell: bash
         run: |
+          set -euo pipefail
           if [ -s debug.keystore.base64 ]; then
             tr -d '\r\n ' < debug.keystore.base64 | base64 -d > debug.keystore
-          fi
-          if [ ! -s debug.keystore ]; then
+            echo "Restored debug.keystore from debug.keystore.base64."
+          elif [ ! -s debug.keystore ]; then
             keytool -genkeypair -v \
               -keystore debug.keystore \
               -storepass android \
@@ -106,23 +246,122 @@ jobs:
               -keysize 2048 \
               -validity 10000 \
               -dname "CN=Android Debug,O=Android,C=US"
+            echo "Generated temporary CI debug.keystore."
+          else
+            echo "Using existing debug.keystore."
           fi
+          keytool -list -keystore debug.keystore -storepass android -alias androiddebugkey >/dev/null
+
+      - name: Validate Gradle project configuration
+        id: gradle_validate
+        run: gradle :app:tasks --group=build --quiet
 
       - name: Run unit tests
-        run: gradle :app:testDebugUnitTest --tests "com.example.BillCircleUnitTest" --stacktrace
+        id: unit_tests
+        run: gradle :app:testDebugUnitTest --stacktrace
 
       - name: Build Debug APK
+        id: build_apk
         run: gradle :app:assembleDebug --stacktrace
 
-      - name: Verify Debug APK output
-        if: success()
+      - name: Verify Google Services resource generation
+        id: verify_google_services_res
         shell: bash
-        run: ls -lh app/build/outputs/apk/debug/app-debug.apk
+        run: |
+          set -euo pipefail
+          GS_VALUES="app/build/generated/res/processDebugGoogleServices/values/values.xml"
+          if [ "${FIREBASE_CONFIGURED:-false}" = "true" ]; then
+            if [ ! -s "$GS_VALUES" ]; then
+              echo "::error::Google Services plugin did not generate $GS_VALUES even though Firebase config was provided."
+              exit 1
+            fi
+            HAS_PROJECT_ID=0; grep -q 'name="project_id"' "$GS_VALUES" && HAS_PROJECT_ID=1 || true
+            HAS_APP_ID=0; grep -q 'name="google_app_id"' "$GS_VALUES" && HAS_APP_ID=1 || true
+            HAS_WEB_CLIENT_ID=0; grep -q 'name="default_web_client_id"' "$GS_VALUES" && HAS_WEB_CLIENT_ID=1 || true
+            echo "Google Services values.xml generated: YES (project_id=$HAS_PROJECT_ID, google_app_id=$HAS_APP_ID, default_web_client_id=$HAS_WEB_CLIENT_ID)"
+            if [ "$HAS_PROJECT_ID" -eq 0 ] || [ "$HAS_APP_ID" -eq 0 ]; then
+              echo "::error::Generated Google Services resources are missing project_id or google_app_id."
+              exit 1
+            fi
+            if [ "$HAS_WEB_CLIENT_ID" -eq 0 ]; then
+              echo "::warning::default_web_client_id was not generated. Ensure Google Sign-In is enabled in Firebase Console and re-download google-services.json."
+              echo "GOOGLE_SERVICES_RES_STATUS=Partial (missing default_web_client_id)" >> "$GITHUB_ENV"
+            else
+              echo "GOOGLE_SERVICES_RES_STATUS=Passed (default_web_client_id generated)" >> "$GITHUB_ENV"
+            fi
+          else
+            echo "Google Services resource generation: Skipped (no google-services.json provided)"
+            echo "GOOGLE_SERVICES_RES_STATUS=Not configured (google-services.json missing)" >> "$GITHUB_ENV"
+          fi
 
-      - name: Upload BillCircle Debug APK
+      - name: Verify APK output and signing
+        id: verify_apk
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+          if [ ! -s "$APK_PATH" ]; then
+            echo "::error::Expected APK not found or empty at $APK_PATH"
+            exit 1
+          fi
+
+          APK_BYTES="$(wc -c < "$APK_PATH")"
+          APK_HUMAN="$(ls -lh "$APK_PATH" | awk '{print $5}')"
+          echo "APK_SIZE_HUMAN=${APK_HUMAN} (${APK_BYTES} bytes)" >> "$GITHUB_ENV"
+
+          python3 -m zipfile -t "$APK_PATH"
+
+          BADGING="$("$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt2" dump badging "$APK_PATH")"
+          echo "$BADGING" | head -n 5
+          if ! grep -Fq "package: name='com.aistudio.billcircle.vkmqrx'" <<< "$BADGING"; then
+            echo "::error::APK package name does not match com.aistudio.billcircle.vkmqrx"
+            exit 1
+          fi
+
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK_PATH"
+
+      - name: Upload BillCircle Debug APK artifact
+        id: upload_apk
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: BillCircle-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+          retention-days: 30
+
+      - name: Generate build summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## BillCircle Android CI Summary"
+            echo ""
+            echo "### Build Environment"
+            echo "| Component | Value |"
+            echo "| --- | --- |"
+            echo "| Project | BillCircle (\`com.aistudio.billcircle.vkmqrx\`) |"
+            echo "| Java | $(java -version 2>&1 | head -n 1) |"
+            echo "| Gradle | 9.3.1 (via \`gradle/actions/setup-gradle@v4\`) |"
+            echo "| Android SDK Platform | \`${SDK_PLATFORM_PKG:-Not configured}\` |"
+            echo "| Android Build Tools | \`${BUILD_TOOLS_PKG:-Not configured}\` |"
+            echo "| Commit SHA | \`${GITHUB_SHA}\` |"
+            echo ""
+            echo "### Validation"
+            echo "| Check | Status |"
+            echo "| --- | --- |"
+            echo "| SDK Setup & Licenses | ${{ steps.android_sdk_install.outcome == 'success' && 'Passed' || 'Failed' }} |"
+            echo "| Firebase Config | ${FIREBASE_STATUS:-Not configured} |"
+            echo "| Google Services Resources | ${GOOGLE_SERVICES_RES_STATUS:-Not tested} |"
+            echo "| Gradle Config | ${{ steps.gradle_validate.outcome == 'success' && 'Passed' || (steps.gradle_validate.outcome == 'skipped' && 'Not tested' || 'Failed') }} |"
+            echo "| Unit Tests | ${{ steps.unit_tests.outcome == 'success' && 'Passed' || (steps.unit_tests.outcome == 'skipped' && 'Not tested' || 'Failed') }} |"
+            echo "| Debug APK Build | ${{ steps.build_apk.outcome == 'success' && 'Passed' || (steps.build_apk.outcome == 'skipped' && 'Not tested' || 'Failed') }} |"
+            echo "| APK Signing & Package | ${{ steps.verify_apk.outcome == 'success' && 'Passed' || (steps.verify_apk.outcome == 'skipped' && 'Not tested' || 'Failed') }} |"
+            echo "| Artifact Upload | ${{ steps.upload_apk.outcome == 'success' && 'Passed' || (steps.upload_apk.outcome == 'skipped' && 'Not tested' || 'Failed') }} |"
+            echo ""
+            echo "### Delivery"
+            echo "- **APK File:** \`app/build/outputs/apk/debug/app-debug.apk\`"
+            echo "- **APK Size:** ${APK_SIZE_HUMAN:-N/A}"
+            echo "- **Artifact Name:** \`BillCircle-debug-apk\`"
+            echo "- **Workflow Run:** ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          } >> "$GITHUB_STEP_SUMMARY"

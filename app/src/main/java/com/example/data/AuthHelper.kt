@@ -33,10 +33,11 @@ private const val AUTH_TAG = "Auth"
 private const val DEFAULT_WEB_CLIENT_ID_RES_NAME = "default_web_client_id"
 
 internal fun safeFirebaseAuthOrNull(context: Context): FirebaseAuth? {
-    if (FirebaseApp.getApps(context).isEmpty()) {
-        runCatching { FirebaseApp.initializeApp(context) }
+    val appCtx = context.applicationContext ?: context
+    if (FirebaseApp.getApps(appCtx).isEmpty()) {
+        runCatching { FirebaseApp.initializeApp(appCtx) }
     }
-    if (FirebaseApp.getApps(context).isEmpty()) {
+    if (FirebaseApp.getApps(appCtx).isEmpty()) {
         return null
     }
     return runCatching { Firebase.auth }.getOrNull()
@@ -66,6 +67,23 @@ internal fun resolveDefaultWebClientId(context: Context): String? {
         .getOrNull()
         ?.trim()
         ?.takeIf { it.isNotEmpty() }
+}
+
+data class FirebaseConfigStatus(
+    val firebaseAppInitialized: Boolean,
+    val webClientIdPresent: Boolean
+) {
+    val isFullyConfigured: Boolean
+        get() = firebaseAppInitialized && webClientIdPresent
+}
+
+fun checkFirebaseConfigStatus(context: Context): FirebaseConfigStatus {
+    val auth = safeFirebaseAuthOrNull(context)
+    val webClientId = resolveDefaultWebClientId(context)
+    return FirebaseConfigStatus(
+        firebaseAppInitialized = auth != null,
+        webClientIdPresent = webClientId != null
+    )
 }
 
 internal fun FirebaseAuth.authStateFlow(): Flow<FirebaseUser?> = callbackFlow {
