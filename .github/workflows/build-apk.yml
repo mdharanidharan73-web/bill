@@ -152,12 +152,25 @@ jobs:
         run: |
           set -euo pipefail
           SOURCE_MODE="none"
-          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
-            if printf '%s' "$GOOGLE_SERVICES_JSON" | grep -q '^[[:space:]]*{'; then
-              printf '%s' "$GOOGLE_SERVICES_JSON" > app/google-services.json
-            else
-              printf '%s' "$GOOGLE_SERVICES_JSON" | tr -d '\r\n ' | base64 -d > app/google-services.json
-            fi
+          if [ -n "$(printf '%s' "$GOOGLE_SERVICES_JSON" | tr -d '[:space:]')" ]; then
+            python3 - << 'PYDECODE'
+          import base64, os, sys
+          raw = os.environ.get("GOOGLE_SERVICES_JSON", "").strip()
+          if raw.startswith("{"):
+              decoded = raw.encode("utf-8")
+          else:
+              compact = "".join(raw.split())
+              try:
+                  decoded = base64.b64decode(compact, validate=True)
+              except Exception:
+                  try:
+                      decoded = base64.urlsafe_b64decode(compact + "=" * ((4 - len(compact) % 4) % 4))
+                  except Exception as exc:
+                      print(f"::error::GOOGLE_SERVICES_JSON is neither valid JSON nor valid Base64 ({type(exc).__name__}).")
+                      sys.exit(1)
+          with open("app/google-services.json", "wb") as f:
+              f.write(decoded)
+          PYDECODE
             SOURCE_MODE="GitHub Actions secret (GOOGLE_SERVICES_JSON)"
           elif [ -s app/google-services.json ]; then
             SOURCE_MODE="Repository file (app/google-services.json)"

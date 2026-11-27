@@ -201,6 +201,39 @@ fun ProfileScreen(
                         Icon(Icons.Filled.VerifiedUser, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                         Text("Security & Audit Guarantee", style = MaterialTheme.typography.titleMedium)
                     }
+                    Surface(
+                        color = if (state.firebaseDiagnostic == com.example.data.FirebaseDiagnosticState.CONFIGURED_AND_CONNECTED) {
+                            ext.successContainer
+                        } else {
+                            MaterialTheme.colorScheme.errorContainer
+                        },
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (state.firebaseDiagnostic == com.example.data.FirebaseDiagnosticState.CONFIGURED_AND_CONNECTED) {
+                                    Icons.Filled.CloudDone
+                                } else {
+                                    Icons.Filled.WarningAmber
+                                },
+                                contentDescription = null,
+                                tint = if (state.firebaseDiagnostic == com.example.data.FirebaseDiagnosticState.CONFIGURED_AND_CONNECTED) {
+                                    ext.success
+                                } else {
+                                    MaterialTheme.colorScheme.error
+                                },
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = "Firebase & Firestore: ${state.firebaseDiagnostic.label}",
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        }
+                    }
                     Text(
                         "• All private groups, bills, and receipts require Google Sign-In and server-enforced Firestore role checks.\n" +
                             "• BillCircle never collects UPI PINs, passwords, or OTPs.\n" +

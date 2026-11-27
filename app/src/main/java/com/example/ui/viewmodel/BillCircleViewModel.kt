@@ -52,7 +52,8 @@ data class BillCircleUiState(
     val unreadMessagesCount: Int = 0,
     val isBusy: Boolean = false,
     val feedbackMessage: String? = null,
-    val aiScanState: AiScanUiState = AiScanUiState.Idle
+    val aiScanState: AiScanUiState = AiScanUiState.Idle,
+    val firebaseDiagnostic: FirebaseDiagnosticState = FirebaseDiagnosticState.CONFIGURED_AND_CONNECTED
 )
 
 class BillCircleViewModel(
@@ -69,6 +70,7 @@ class BillCircleViewModel(
     private val _busy = MutableStateFlow(false)
     private val _feedback = MutableStateFlow<String?>(null)
     private val _streamError = MutableStateFlow<String?>(null)
+    private val _firebaseDiagnostic = MutableStateFlow(FirebaseDiagnosticState.CONFIGURED_AND_CONNECTED)
     private val _aiScanState = MutableStateFlow<AiScanUiState>(AiScanUiState.Idle)
 
     private fun <T> Flow<T>.safeState(initial: T, label: String): StateFlow<T> =
@@ -79,7 +81,24 @@ class BillCircleViewModel(
             if (firestoreError == null && error is CancellationException) throw error
             val root = firestoreError ?: error
             Log.w(VM_TAG, "Error observing $label", root)
-            _streamError.value = root.localizedMessage ?: "Failed to sync $label"
+            when (firestoreError?.code) {
+                FirebaseFirestoreException.Code.PERMISSION_DENIED -> {
+                    _firebaseDiagnostic.value = FirebaseDiagnosticState.FIRESTORE_PERMISSION_DENIED
+                    _streamError.value = "Firestore permission denied while reading $label. Verify your account belongs to this group and Firestore rules are deployed."
+                }
+                FirebaseFirestoreException.Code.UNAVAILABLE,
+                FirebaseFirestoreException.Code.DEADLINE_EXCEEDED -> {
+                    _firebaseDiagnostic.value = FirebaseDiagnosticState.NETWORK_UNAVAILABLE
+                    _streamError.value = "Network unavailable: Cloud Firestore could not reach the server while syncing $label."
+                }
+                FirebaseFirestoreException.Code.UNAUTHENTICATED -> {
+                    _firebaseDiagnostic.value = FirebaseDiagnosticState.AUTHENTICATION_FAILED
+                    _streamError.value = "Authentication required to access $label. Please sign in with Google again."
+                }
+                else -> {
+                    _streamError.value = root.localizedMessage ?: "Failed to sync $label"
+                }
+            }
             emit(initial)
         }.stateIn(
             scope = viewModelScope,
@@ -134,9 +153,9 @@ class BillCircleViewModel(
         coreBundleFlow,
         detailBundleFlow,
         metaBundleFlow,
-        _streamError,
-        _aiScanState
-    ) { core, detail, meta, err, aiState ->
+        combine(_streamError, _firebaseDiagnostic, _aiScanState) { err, diag, ai -> Triple(err, diag, ai) }
+    ) { core, detail, meta, statusTriple ->
+        val (err, diag, aiState) = statusTriple
         val effectiveName = core.profile?.displayName?.ifBlank { initialDisplayName } ?: initialDisplayName
         val groups = if (meta.demoMode) DemoModeData.sampleGroups(currentUserId, effectiveName) else core.groups
         val members = if (meta.demoMode) DemoModeData.sampleMembers(currentUserId, effectiveName) else core.members
@@ -185,7 +204,8 @@ class BillCircleViewModel(
             unreadMessagesCount = unreadMsgs,
             isBusy = meta.busy,
             feedbackMessage = meta.feedback,
-            aiScanState = aiState
+            aiScanState = aiState,
+            firebaseDiagnostic = diag
         )
     }.stateIn(
         scope = viewModelScope,

@@ -96,7 +96,18 @@ data class AppStrings(
     val saveProfile: String,
     val signOut: String,
     val demoModeLabel: String,
-    val demoModeBanner: String
+    val demoModeBanner: String,
+    // Firebase Setup Screen
+    val setupRequiredTitle: String,
+    val setupRequiredSubtitle: String,
+    val setupInvalidTitle: String,
+    val setupInvalidSubtitle: String,
+    val retryVerification: String,
+    val checkingSetup: String,
+    val adminSetupSteps: String,
+    val adminSetupHint: String,
+    val setupStillNeededFeedback: String,
+    val packageCopied: String
 )
 
 val EnglishStrings = AppStrings(
@@ -172,7 +183,17 @@ val EnglishStrings = AppStrings(
     saveProfile = "Save Changes",
     signOut = "Sign Out",
     demoModeLabel = "Sample Preview Mode",
-    demoModeBanner = "Sample Demo Mode Active — Showing example bills (live Firebase paused)"
+    demoModeBanner = "Sample Demo Mode Active — Showing example bills (live Firebase paused)",
+    setupRequiredTitle = "Cloud Setup Needed",
+    setupRequiredSubtitle = "BillCircle needs a quick one-time cloud setup by your group administrator before family members can sign in and sync shared bills.",
+    setupInvalidTitle = "Cloud Setup Needs Attention",
+    setupInvalidSubtitle = "BillCircle detected an incomplete or invalid cloud configuration. Ask your group administrator to verify the Firebase setup and rebuild.",
+    retryVerification = "Retry Verification",
+    checkingSetup = "Checking configuration...",
+    adminSetupSteps = "Administrator Setup Steps",
+    adminSetupHint = "For group admins & developers configuring Firebase",
+    setupStillNeededFeedback = "Still waiting for valid Firebase configuration. Check the setup steps below.",
+    packageCopied = "Package ID copied to clipboard"
 )
 
 val KannadaStrings = AppStrings(
@@ -248,7 +269,17 @@ val KannadaStrings = AppStrings(
     saveProfile = "ಬದಲಾವಣೆಗಳನ್ನು ಉಳಿಸಿ",
     signOut = "ಸೈನ್ ಔಟ್",
     demoModeLabel = "ಮಾದರಿ ಡೆಮೊ ಮೋಡ್",
-    demoModeBanner = "ಡೆಮೊ ಮೋಡ್ ಸಕ್ರಿಯವಾಗಿದೆ — ಮಾದರಿ ಡೇಟಾ ತೋರಿಸಲಾಗುತ್ತಿದೆ"
+    demoModeBanner = "ಡೆಮೊ ಮೋಡ್ ಸಕ್ರಿಯವಾಗಿದೆ — ಮಾದರಿ ಡೇಟಾ ತೋರಿಸಲಾಗುತ್ತಿದೆ",
+    setupRequiredTitle = "ಕ್ಲೌಡ್ ಸೆಟಪ್ ಅಗತ್ಯವಿದೆ",
+    setupRequiredSubtitle = "ಕುಟುಂಬದ ಸದಸ್ಯರು ಸೈನ್ ಇನ್ ಮಾಡಿ ಬಿಲ್‌ಗಳನ್ನು ಹಂಚಿಕೊಳ್ಳುವ ಮೊದಲು ಗುಂಪಿನ ನಿರ್ವಾಹಕರಿಂದ ಒಮ್ಮೆ ಕ್ಲೌಡ್ ಸೆಟಪ್ ಅಗತ್ಯವಿದೆ.",
+    setupInvalidTitle = "ಕ್ಲೌಡ್ ಸೆಟಪ್ ಪರಿಶೀಲಿಸಿ",
+    setupInvalidSubtitle = "ಅಪೂರ್ಣ ಅಥವಾ ಅಮಾನ್ಯ Firebase ಸೆಟ್ಟಿಂಗ್ ಪತ್ತೆಯಾಗಿದೆ. ದಯವಿಟ್ಟು ನಿರ್ವಾಹಕರನ್ನು ಸಂಪರ್ಕಿಸಿ ಮತ್ತು ಮರುನಿರ್ಮಿಸಿ.",
+    retryVerification = "ಮತ್ತೆ ಪರಿಶೀಲಿಸಿ",
+    checkingSetup = "ಪರಿಶೀಲಿಸಲಾಗುತ್ತಿದೆ...",
+    adminSetupSteps = "ನಿರ್ವಾಹಕರ ಸೆಟಪ್ ಹಂತಗಳು",
+    adminSetupHint = "Firebase ಕಾನ್ಫಿಗರ್ ಮಾಡುವ ನಿರ್ವಾಹಕರು ಮತ್ತು ಡೆವಲಪರ್‌ಗಳಿಗಾಗಿ",
+    setupStillNeededFeedback = "ಮಾನ್ಯ Firebase ಕಾನ್ಫಿಗರೇಶನ್ ಇನ್ನೂ ಲಭ್ಯವಿಲ್ಲ. ಕೆಳಗಿನ ಹಂತಗಳನ್ನು ಪರಿಶೀಲಿಸಿ.",
+    packageCopied = "ಪ್ಯಾಕೇಜ್ ID ನಕಲಿಸಲಾಗಿದೆ"
 )
 
 val TamilStrings = AppStrings(
@@ -324,7 +355,17 @@ val TamilStrings = AppStrings(
     saveProfile = "மாற்றங்களை சேமி",
     signOut = "வெளியேறு",
     demoModeLabel = "மாதிரி டெமோ பயன்முறை",
-    demoModeBanner = "டெமோ பயன்முறை செயலில் உள்ளது — மாதிரி தரவு காட்டப்படுகிறது"
+    demoModeBanner = "டெமோ பயன்முறை செயலில் உள்ளது — மாதிரி தரவு காட்டப்படுகிறது",
+    setupRequiredTitle = "கிளவுட் அமைப்பு தேவை",
+    setupRequiredSubtitle = "குடும்ப உறுப்பினர்கள் உள்நுழைந்து பில்களைப் பகிர்வதற்கு முன் குழு நிர்வாகியால் ஒருமுறை கிளவுட் அமைப்பு செய்யப்பட வேண்டும்.",
+    setupInvalidTitle = "கிளவுட் அமைப்பைச் சரிபார்க்கவும்",
+    setupInvalidSubtitle = "முழுமையற்ற அல்லது தவறான Firebase அமைப்பு கண்டறியப்பட்டது. உங்கள் குழு நிர்வாகியிடம் சரிபார்த்து மீண்டும் உருவாக்கவும்.",
+    retryVerification = "மீண்டும் சரிபார்",
+    checkingSetup = "அமைப்பு சரிபார்க்கப்படுகிறது...",
+    adminSetupSteps = "நிர்வாகி அமைப்பு படிகள்",
+    adminSetupHint = "Firebase அமைக்கும் நிர்வாகிகள் மற்றும் டெவலப்பர்களுக்காக",
+    setupStillNeededFeedback = "சரியான Firebase அமைப்பு இன்னும் இல்லை. கீழே உள்ள படிகளைப் பார்க்கவும்.",
+    packageCopied = "தொகுப்பு ID நகலெடுக்கப்பட்டது"
 )
 
 fun stringsFor(language: AppLanguage): AppStrings = when (language) {

@@ -77,4 +77,54 @@ class BillCircleUnitTest {
         // Verify dark module at (dim - 8, 8)
         assertTrue(matrix[dim - 8][8])
     }
+
+    @Test
+    fun firebaseVerifier_validConfig_returnsReady() {
+        val state = com.example.data.FirebaseRuntimeVerifier.evaluateConfiguration(
+            firebaseAppInitialized = true,
+            projectId = "gen-lang-client-0217149989",
+            googleAppId = "1:336482821261:android:2d8ab51463b2b953c1eec4",
+            webClientId = "336482821261-gnqkos3m7lenl26g2jicqnjefstev5nu.apps.googleusercontent.com",
+            databaseId = "ai-studio-android-billcirc-ea91734e-5d8a-49d4-a024-0738a9073ef2"
+        )
+        assertTrue(state is com.example.data.FirebaseInitState.Ready)
+        assertTrue(state.checks.all { it.passed })
+    }
+
+    @Test
+    fun firebaseVerifier_missingGoogleServices_returnsNotConfigured() {
+        val state = com.example.data.FirebaseRuntimeVerifier.evaluateConfiguration(
+            firebaseAppInitialized = false,
+            projectId = null,
+            googleAppId = null,
+            webClientId = null,
+            databaseId = "ai-studio-android-billcirc-ea91734e-5d8a-49d4-a024-0738a9073ef2"
+        )
+        assertTrue(state is com.example.data.FirebaseInitState.NotConfigured)
+    }
+
+    @Test
+    fun firebaseVerifier_placeholderOrMalformedAppId_returnsInvalidConfiguration() {
+        val state = com.example.data.FirebaseRuntimeVerifier.evaluateConfiguration(
+            firebaseAppInitialized = true,
+            projectId = "remixed-project-id",
+            googleAppId = "invalid-app-id",
+            webClientId = "336482821261-valid.apps.googleusercontent.com",
+            databaseId = "my-db"
+        )
+        assertTrue(state is com.example.data.FirebaseInitState.InvalidConfiguration)
+    }
+
+    @Test
+    fun firebaseVerifier_missingWebClientId_returnsInvalidConfiguration() {
+        val state = com.example.data.FirebaseRuntimeVerifier.evaluateConfiguration(
+            firebaseAppInitialized = true,
+            projectId = "gen-lang-client-0217149989",
+            googleAppId = "1:336482821261:android:2d8ab51463b2b953c1eec4",
+            webClientId = "",
+            databaseId = "ai-studio-android-billcirc-ea91734e-5d8a-49d4-a024-0738a9073ef2"
+        )
+        assertTrue(state is com.example.data.FirebaseInitState.InvalidConfiguration)
+        assertTrue(state.checks.first { it.id == "google_signin_client" }.passed.not())
+    }
 }

@@ -4,19 +4,24 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.util.Log
 import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.GetCredentialException
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential.Companion.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
 import com.google.firebase.Firebase
 import com.google.firebase.FirebaseApp
+import com.google.firebase.FirebaseNetworkException
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseAuthException
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.auth
@@ -28,9 +33,47 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import java.net.ConnectException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 
 private const val AUTH_TAG = "Auth"
 private const val DEFAULT_WEB_CLIENT_ID_RES_NAME = "default_web_client_id"
+
+enum class FirebaseDiagnosticState(val label: String) {
+    CONFIGURED_AND_CONNECTED("Firebase Configured & Connected"),
+    CONFIG_MISSING("Firebase Configuration Missing"),
+    NETWORK_UNAVAILABLE("Network Unavailable"),
+    AUTHENTICATION_FAILED("Authentication Failed"),
+    FIRESTORE_PERMISSION_DENIED("Firestore Permission Denied")
+}
+
+data class FirebaseConfigStatus(
+    val firebaseAppInitialized: Boolean,
+    val webClientIdPresent: Boolean,
+    val networkAvailable: Boolean
+) {
+    val isFullyConfigured: Boolean
+        get() = firebaseAppInitialized && webClientIdPresent
+
+    val diagnosticState: FirebaseDiagnosticState
+        get() = when {
+            !isFullyConfigured -> FirebaseDiagnosticState.CONFIG_MISSING
+            !networkAvailable -> FirebaseDiagnosticState.NETWORK_UNAVAILABLE
+            else -> FirebaseDiagnosticState.CONFIGURED_AND_CONNECTED
+        }
+}
+
+fun isNetworkAvailable(context: Context): Boolean {
+    return runCatching {
+        val cm = context.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return false
+        val network = cm.activeNetwork ?: return false
+        val caps = cm.getNetworkCapabilities(network) ?: return false
+        caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    }.getOrElse { false }
+}
 
 internal fun safeFirebaseAuthOrNull(context: Context): FirebaseAuth? {
     val appCtx = context.applicationContext ?: context
@@ -69,20 +112,14 @@ internal fun resolveDefaultWebClientId(context: Context): String? {
         ?.takeIf { it.isNotEmpty() }
 }
 
-data class FirebaseConfigStatus(
-    val firebaseAppInitialized: Boolean,
-    val webClientIdPresent: Boolean
-) {
-    val isFullyConfigured: Boolean
-        get() = firebaseAppInitialized && webClientIdPresent
-}
-
 fun checkFirebaseConfigStatus(context: Context): FirebaseConfigStatus {
     val auth = safeFirebaseAuthOrNull(context)
     val webClientId = resolveDefaultWebClientId(context)
+    val online = isNetworkAvailable(context)
     return FirebaseConfigStatus(
         firebaseAppInitialized = auth != null,
-        webClientIdPresent = webClientId != null
+        webClientIdPresent = webClientId != null,
+        networkAvailable = online
     )
 }
 
@@ -98,6 +135,16 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this
     is ContextWrapper -> baseContext.findActivity()
     else -> null
+}
+
+private fun isNetworkThrowable(t: Throwable): Boolean {
+    return generateSequence(t) { it.cause }.any { cause ->
+        cause is FirebaseNetworkException ||
+            cause is UnknownHostException ||
+            cause is ConnectException ||
+            cause is SocketTimeoutException ||
+            cause.message?.contains("network", ignoreCase = true) == true
+    }
 }
 
 /**
@@ -123,6 +170,11 @@ fun attemptAutoSignIn(
     val clientId = resolveDefaultWebClientId(context)
     if (clientId == null) {
         Log.w(AUTH_TAG, "default_web_client_id resource unavailable; skipping auto sign-in.")
+        onUnauthenticated()
+        return
+    }
+    if (!isNetworkAvailable(context)) {
+        Log.w(AUTH_TAG, "Network unavailable; skipping silent auto sign-in.")
         onUnauthenticated()
         return
     }
@@ -161,25 +213,42 @@ fun onGoogleSignInClicked(
     context: Context,
     credentialManager: CredentialManager,
     onAuthSuccess: () -> Unit,
-    onAuthError: (String) -> Unit,
+    onAuthError: (FirebaseDiagnosticState, String) -> Unit,
     scope: CoroutineScope,
     onAuthCancelled: () -> Unit = {}
 ) {
     val auth = safeFirebaseAuthOrNull(context)
     if (auth == null) {
         Log.e(AUTH_TAG, "FirebaseApp is not initialized. Missing app/google-services.json.")
-        onAuthError("Firebase is not configured in this build. Add app/google-services.json from Firebase Console and rebuild.")
+        onAuthError(
+            FirebaseDiagnosticState.CONFIG_MISSING,
+            "Firebase is not configured in this build. Add app/google-services.json from Firebase Console and rebuild."
+        )
         return
     }
     val clientId = resolveDefaultWebClientId(context)
     if (clientId == null) {
         Log.e(AUTH_TAG, "Google Sign-In configuration missing: default_web_client_id resource not found.")
-        onAuthError("Google Sign-In is not configured in this build. Add app/google-services.json for com.aistudio.billcircle.vkmqrx and rebuild.")
+        onAuthError(
+            FirebaseDiagnosticState.CONFIG_MISSING,
+            "Google Sign-In Web Client ID (default_web_client_id) is missing. Add app/google-services.json with Google Sign-In enabled and rebuild."
+        )
+        return
+    }
+    if (!isNetworkAvailable(context)) {
+        Log.w(AUTH_TAG, "Google Sign-In blocked: network unavailable.")
+        onAuthError(
+            FirebaseDiagnosticState.NETWORK_UNAVAILABLE,
+            "Network unavailable. Connect to Wi-Fi or mobile data to sign in with Google."
+        )
         return
     }
     val activity = context.findActivity()
     if (activity == null) {
-        onAuthError("Unable to launch Google Sign-In without an active Activity.")
+        onAuthError(
+            FirebaseDiagnosticState.AUTHENTICATION_FAILED,
+            "Unable to launch Google Sign-In without an active Activity."
+        )
         return
     }
 
@@ -198,14 +267,34 @@ fun onGoogleSignInClicked(
                 ).await()
                 onAuthSuccess()
             } else {
-                onAuthError("Unexpected credential type received.")
+                onAuthError(
+                    FirebaseDiagnosticState.AUTHENTICATION_FAILED,
+                    "Unexpected credential type received from Google Sign-In."
+                )
             }
         } catch (e: GetCredentialCancellationException) {
             Log.w(AUTH_TAG, "Google Sign-In flow cancelled or dismissed: ${e.message}", e)
             onAuthCancelled()
         } catch (e: Exception) {
             Log.e(AUTH_TAG, "Google Sign-In failed", e)
-            onAuthError(e.localizedMessage ?: "Sign-in failed. Please try again.")
+            when {
+                isNetworkThrowable(e) -> onAuthError(
+                    FirebaseDiagnosticState.NETWORK_UNAVAILABLE,
+                    "Network error while contacting Google or Firebase Authentication. Check your internet connection and retry."
+                )
+                e is FirebaseAuthException -> onAuthError(
+                    FirebaseDiagnosticState.AUTHENTICATION_FAILED,
+                    "Firebase Authentication failed (${e.errorCode}): ${e.localizedMessage ?: "Verify SHA-1/SHA-256 and Google Sign-In in Firebase Console."}"
+                )
+                e is GetCredentialException -> onAuthError(
+                    FirebaseDiagnosticState.AUTHENTICATION_FAILED,
+                    "Google Sign-In failed (${e.type}): ${e.localizedMessage ?: "Verify SHA-1 fingerprint and Web Client ID in Firebase Console."}"
+                )
+                else -> onAuthError(
+                    FirebaseDiagnosticState.AUTHENTICATION_FAILED,
+                    e.localizedMessage ?: "Authentication failed. Please try again."
+                )
+            }
         }
     }
 }

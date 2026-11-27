@@ -31,7 +31,6 @@ import com.example.ui.screens.*
 import com.example.ui.theme.BillCircleTheme
 import com.example.ui.viewmodel.BillCircleViewModel
 import com.example.util.configureAppCheck
-import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.flow.flowOf
@@ -41,13 +40,25 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // STEP 1: Mandatory Firebase App Check initialization before Compose UI or ViewModels
-        configureAppCheck(this, intent)
+        // STEP 1: Verify Firebase initialization at startup & configure App Check when ready
+        val initialFirebaseState = FirebaseRuntimeVerifier.verify(this)
+        if (initialFirebaseState is FirebaseInitState.Ready) {
+            configureAppCheck(this, intent)
+        }
 
         enableEdgeToEdge()
         setContent {
             BillCircleTheme {
-                BillCircleRootApp()
+                BillCircleRootApp(
+                    initialFirebaseState = initialFirebaseState,
+                    onReverifyFirebase = {
+                        val updated = FirebaseRuntimeVerifier.verify(this)
+                        if (updated is FirebaseInitState.Ready) {
+                            configureAppCheck(this, intent)
+                        }
+                        updated
+                    }
+                )
             }
         }
     }
@@ -63,17 +74,35 @@ private sealed interface SubScreen {
 }
 
 @Composable
-private fun BillCircleRootApp() {
+private fun BillCircleRootApp(
+    initialFirebaseState: FirebaseInitState,
+    onReverifyFirebase: () -> FirebaseInitState
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val prefsStore = remember(context) { PreferencesStore(context.applicationContext) }
     val selectedLang by prefsStore.languageFlow.collectAsStateWithLifecycle(initialValue = AppLanguage.ENGLISH)
-
-    val firebaseAuth = remember(context) { safeFirebaseAuthOrNull(context) }
-    val authFlow = remember(firebaseAuth) { firebaseAuth?.authStateFlow() ?: flowOf(null) }
-    val currentUser by authFlow.collectAsStateWithLifecycle(initialValue = firebaseAuth?.currentUser)
+    var firebaseInitState by remember { mutableStateOf(initialFirebaseState) }
 
     CompositionLocalProvider(LocalAppStrings provides stringsFor(selectedLang)) {
+        if (firebaseInitState !is FirebaseInitState.Ready) {
+            FirebaseSetupScreen(
+                initState = firebaseInitState,
+                selectedLanguage = selectedLang,
+                onSelectLanguage = { lang -> scope.launch { prefsStore.setLanguage(lang) } },
+                onRetryCheck = {
+                    val updated = onReverifyFirebase()
+                    firebaseInitState = updated
+                    updated
+                }
+            )
+            return@CompositionLocalProvider
+        }
+
+        val firebaseAuth = remember(context) { safeFirebaseAuthOrNull(context) }
+        val authFlow = remember(firebaseAuth) { firebaseAuth?.authStateFlow() ?: flowOf(null) }
+        val currentUser by authFlow.collectAsStateWithLifecycle(initialValue = firebaseAuth?.currentUser)
+
         val user = currentUser
         if (user == null) {
             AuthScreen(
