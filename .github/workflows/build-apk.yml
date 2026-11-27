@@ -87,19 +87,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # `yes` exits with SIGPIPE (141) when sdkmanager closes stdin; fail if sdkmanager itself fails.
-          yes | "$SDKMANAGER_BIN" --sdk_root="$ANDROID_SDK_ROOT" --licenses >/dev/null || {
-            rc_yes="${PIPESTATUS[0]:-0}"
-            rc_sdk="${PIPESTATUS[1]:-1}"
-            if [ "$rc_sdk" -ne 0 ]; then
-              echo "::error::sdkmanager --licenses failed with exit code $rc_sdk"
-              exit "$rc_sdk"
-            fi
-            if [ "$rc_yes" -ne 0 ] && [ "$rc_yes" -ne 141 ]; then
-              echo "::error::yes pipeline failed unexpectedly with exit code $rc_yes"
-              exit "$rc_yes"
-            fi
-          }
+          # sdkmanager may close stdin after accepting all licenses; yes can then report
+          # "Broken pipe". Capture the exit code of sdkmanager (the last pipeline command),
+          # not yes, and fail only when sdkmanager itself fails.
+          set +e
+          set +o pipefail
+          yes 2>/dev/null | "$SDKMANAGER_BIN" --sdk_root="$ANDROID_SDK_ROOT" --licenses >/dev/null
+          SDKMANAGER_LICENSE_RC=$?
+          set -o pipefail
+          set -e
+          if [ "$SDKMANAGER_LICENSE_RC" -ne 0 ]; then
+            echo "::error::sdkmanager --licenses failed with exit code $SDKMANAGER_LICENSE_RC"
+            exit "$SDKMANAGER_LICENSE_RC"
+          fi
           echo "Android SDK licenses accepted."
 
       - name: Install and verify Android SDK packages
